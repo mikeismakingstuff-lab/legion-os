@@ -1,0 +1,5 @@
+.aider*
+__pycache__/
+*.pyc
+.pytest_cache/
+pipeline.db

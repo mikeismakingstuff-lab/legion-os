@@ -1,0 +1,565 @@
+[
+    {
+        "mode_id": "educational_academy",
+        "display_name": "Educational Academy",
+        "peer_review_roles": [
+            {
+                "role_name": "Curriculum Compliance Director",
+                "description": "Audits generated lessons and quizzes against grade level, educational standards, and structural pacing metrics.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 1.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 2.0,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Assessment Accuracy Monitor",
+                "description": "Verifies grading outputs, traces student errors to root conceptual bottlenecks.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 2.0,
+                    "chief_executor": 1.0,
+                    "archivist": 2.0,
+                    "legal_qa": 1.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "text documents",
+            "structured curriculum files",
+            "assessment response logs"
+        ],
+        "default_min_length": 120
+    },
+    {
+        "mode_id": "content_syndicate",
+        "display_name": "Content Syndicate",
+        "peer_review_roles": [
+            {
+                "role_name": "Editor-in-Chief (Tone Gate)",
+                "description": "Reviews drafts against brand identity guidelines, style sheets, narrative voice constraints.",
+                "lens_modifiers": {
+                    "creative_director": 2.0,
+                    "financial_director": 0.5,
+                    "technical_director": 0.5,
+                    "marketing_director": 1.5,
+                    "audience_retention": 1.5,
+                    "chief_executor": 1.0,
+                    "archivist": 1.0,
+                    "legal_qa": 1.5
+                }
+            },
+            {
+                "role_name": "SEO Optimization Specialist",
+                "description": "Cross-references text against semantic targets, entity density, search schema layouts.",
+                "lens_modifiers": {
+                    "creative_director": 1.0,
+                    "financial_director": 1.0,
+                    "technical_director": 1.5,
+                    "marketing_director": 2.0,
+                    "audience_retention": 1.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.0,
+                    "legal_qa": 0.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "multi-source text",
+            "URLs",
+            "social data streams",
+            "RSS feeds"
+        ],
+        "default_min_length": 80
+    },
+    {
+        "mode_id": "secops_triager",
+        "display_name": "SecOps Triager",
+        "peer_review_roles": [
+            {
+                "role_name": "Blast Radius Assessor",
+                "description": "Cross-examines indicators against internal network topology to map lateral movement vectors.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 1.0
+                }
+            },
+            {
+                "role_name": "Compliance & Impact Auditor",
+                "description": "Evaluates incident profile against data regulatory standards (SOC2, HIPAA, GDPR).",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.5,
+                    "technical_director": 1.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "system logs",
+            "event streams",
+            "network access records"
+        ],
+        "default_min_length": 40
+    },
+    {
+        "mode_id": "code_guard",
+        "display_name": "Code Guard",
+        "peer_review_roles": [
+            {
+                "role_name": "Application Security Scanner",
+                "description": "Evaluates code modifications for leaked secrets, unsafe calls, known vulnerabilities.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Architecture Compliance Specialist",
+                "description": "Verifies new code respects modularity, decoupling, and OOP guidelines.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 2.0,
+                    "legal_qa": 1.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "git diffs",
+            "package manifests",
+            "changelog files"
+        ],
+        "default_min_length": 30
+    },
+    {
+        "mode_id": "video_narrative_engine",
+        "display_name": "Video Narrative Engine",
+        "peer_review_roles": [
+            {
+                "role_name": "Audience Retention Analyst",
+                "description": "Scans hook (first 15 seconds) and structural transitions for retention maximization.",
+                "lens_modifiers": {
+                    "creative_director": 1.5,
+                    "financial_director": 0.5,
+                    "technical_director": 0.5,
+                    "marketing_director": 2.0,
+                    "audience_retention": 2.0,
+                    "chief_executor": 1.0,
+                    "archivist": 1.0,
+                    "legal_qa": 0.5
+                }
+            },
+            {
+                "role_name": "Pacing & Rhythm Director",
+                "description": "Measures sentence lengths, verbal cadence, speech-delivery timing.",
+                "lens_modifiers": {
+                    "creative_director": 2.0,
+                    "financial_director": 0.5,
+                    "technical_director": 1.0,
+                    "marketing_director": 1.0,
+                    "audience_retention": 2.0,
+                    "chief_executor": 1.0,
+                    "archivist": 0.5,
+                    "legal_qa": 0.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "text",
+            "social comments",
+            "research documents",
+            "trend reports"
+        ],
+        "default_min_length": 60
+    },
+    {
+        "mode_id": "customer_voc_synthesizer",
+        "display_name": "Customer VOC Synthesizer",
+        "peer_review_roles": [
+            {
+                "role_name": "Severity & Friction Assessor",
+                "description": "Determines if complaints indicate high-priority failures, outages, or minor UX issues.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 1.5,
+                    "chief_executor": 2.0,
+                    "archivist": 1.0,
+                    "legal_qa": 1.5
+                }
+            },
+            {
+                "role_name": "Ticket Deduplicator",
+                "description": "Cross-references feedback summaries against open bug report ledger.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 2.0,
+                    "legal_qa": 0.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "support logs",
+            "chat transcripts",
+            "review text",
+            "feedback forms"
+        ],
+        "default_min_length": 50
+    },
+    {
+        "mode_id": "product_listing_machine",
+        "display_name": "Product Listing Machine",
+        "peer_review_roles": [
+            {
+                "role_name": "Brand Compliance Monitor",
+                "description": "Ensures descriptions avoid prohibited claims, blacklisted phrases, trademark violations.",
+                "lens_modifiers": {
+                    "creative_director": 1.5,
+                    "financial_director": 1.0,
+                    "technical_director": 0.5,
+                    "marketing_director": 1.5,
+                    "audience_retention": 1.0,
+                    "chief_executor": 1.0,
+                    "archivist": 1.0,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Schema Integrity Auditor",
+                "description": "Mandates output payloads map exactly to target marketplace structure requirements.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 1.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 1.0,
+                    "legal_qa": 1.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "spreadsheets",
+            "CSV",
+            "structured text specifications"
+        ],
+        "default_min_length": 40
+    },
+    {
+        "mode_id": "real_estate_qualifier",
+        "display_name": "Real Estate Qualifier",
+        "peer_review_roles": [
+            {
+                "role_name": "Municipal Risk Auditor",
+                "description": "Scans for unresolved tax liens, zoning restrictions, irregular title transfers.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.5,
+                    "technical_director": 1.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 2.0,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Underwriting Logic Gate",
+                "description": "Compares renovation estimates and cap-rate formulas against investment thresholds.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 2.0,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 1.0,
+                    "legal_qa": 1.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "structured property records",
+            "CSV data rows",
+            "public record text"
+        ],
+        "default_min_length": 60
+    },
+    {
+        "mode_id": "patch_guard",
+        "display_name": "Patch Guard",
+        "peer_review_roles": [
+            {
+                "role_name": "Code Impact Evaluator",
+                "description": "Determines if a vulnerability matches an active, exposed execution path.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Breaking Change Auditor",
+                "description": "Scans changelogs for deprecated methods and syntax that break active API logic.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 2.0,
+                    "legal_qa": 0.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "CVE text definitions",
+            "package changelogs",
+            "advisory feeds"
+        ],
+        "default_min_length": 50
+    },
+    {
+        "mode_id": "digital_archival_processor",
+        "display_name": "Digital Archival Processor",
+        "peer_review_roles": [
+            {
+                "role_name": "OCR Quality Auditor",
+                "description": "Flags strings below confidence metrics or containing corrupt formatting.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.0,
+                    "archivist": 2.0,
+                    "legal_qa": 1.5
+                }
+            },
+            {
+                "role_name": "Data Retention Officer",
+                "description": "Checks output document types against regulatory timelines for encryption or deletion.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 1.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 2.0,
+                    "legal_qa": 2.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "raw text files",
+            "OCR output files",
+            "document scans"
+        ],
+        "default_min_length": 30
+    },
+    {
+        "mode_id": "network_flow_hunter",
+        "display_name": "Network Flow Hunter",
+        "peer_review_roles": [
+            {
+                "role_name": "Network Attribution Analyst",
+                "description": "Cross-references destinations against known CDNs and cloud infrastructure to eliminate false positives.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 2.0,
+                    "legal_qa": 1.0
+                }
+            },
+            {
+                "role_name": "Protocol Integrity Auditor",
+                "description": "Analyzes payload patterns against known advanced threat actor behavior signatures.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "connection logs",
+            "packet metadata",
+            "hardware trigger event files"
+        ],
+        "default_min_length": 30
+    },
+    {
+        "mode_id": "market_sentiment_aggregator",
+        "display_name": "Market Sentiment Aggregator",
+        "peer_review_roles": [
+            {
+                "role_name": "Quantitative Sanity Tester",
+                "description": "Validates operational numbers against hard data pulled via static API tables.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 2.0,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.0,
+                    "archivist": 1.5,
+                    "legal_qa": 1.5
+                }
+            },
+            {
+                "role_name": "Corporate Noise Filter",
+                "description": "Strips generalized buzzwords, isolates only verifiable performance metrics.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 2.0,
+                    "technical_director": 1.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.5,
+                    "archivist": 2.0,
+                    "legal_qa": 1.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "earnings transcripts",
+            "financial filings",
+            "analyst report text"
+        ],
+        "default_min_length": 100
+    },
+    {
+        "mode_id": "telemetry_diagnostic_loop",
+        "display_name": "Telemetry Diagnostic Loop",
+        "peer_review_roles": [
+            {
+                "role_name": "System Safety Triager",
+                "description": "Assesses if telemetry pattern indicates active failure loop requiring shutdown.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 1.0,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 1.5,
+                    "legal_qa": 1.5
+                }
+            },
+            {
+                "role_name": "Logistics & Inventory Checker",
+                "description": "Evaluates maintenance request against local asset databases for parts availability.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 2.0,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 2.0,
+                    "archivist": 1.5,
+                    "legal_qa": 0.5
+                }
+            }
+        ],
+        "ingest_formats": [
+            "sensor log files",
+            "telemetry streams",
+            "anomaly event records"
+        ],
+        "default_min_length": 30
+    },
+    {
+        "mode_id": "lit_review_examiner",
+        "display_name": "Lit Review Examiner",
+        "peer_review_roles": [
+            {
+                "role_name": "Statistical Validity Auditor",
+                "description": "Extracts sample sizes, p-values, experimental variables to verify mathematical integrity.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 2.0,
+                    "marketing_director": 0.5,
+                    "audience_retention": 1.0,
+                    "chief_executor": 1.0,
+                    "archivist": 1.5,
+                    "legal_qa": 2.0
+                }
+            },
+            {
+                "role_name": "Citation Validity Tracker",
+                "description": "Scans reference listings against academic indexes to flag hallucinated or circular citations.",
+                "lens_modifiers": {
+                    "creative_director": 0.5,
+                    "financial_director": 0.5,
+                    "technical_director": 1.5,
+                    "marketing_director": 0.5,
+                    "audience_retention": 0.5,
+                    "chief_executor": 1.0,
+                    "archivist": 2.0,
+                    "legal_qa": 2.0
+                }
+            }
+        ],
+        "ingest_formats": [
+            "academic text",
+            "PDF preprints",
+            "structured research documents"
+        ],
+        "default_min_length": 200
+    }
+]

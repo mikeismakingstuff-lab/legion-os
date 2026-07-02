@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Committee OS — Technical Reference Manual</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+
+  :root {
+    --bg:        #0C0C0A;
+    --surface:   #141412;
+    --border:    #2C2C26;
+    --dim:       #3E3E36;
+    --muted:     #7A7A6E;
+    --text:      #E8E4D8;
+    --warm:      #F2EDD8;
+    --gold:      #C8A84A;
+    --gold-dim:  #8A7030;
+    --red:       #C0392B;
+    --mono:      'IBM Plex Mono', monospace;
+    --serif:     'Cormorant Garamond', Georgia, serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { font-size: 16px; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--serif);
+    font-weight: 300;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* Grain overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+    opacity: 0.028;
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 40px 100px;
+  }
+
+  /* ─── COVER ─────────────────────────────────────────────── */
+
+  .cover {
+    padding: 80px 0 64px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+
+  .cover-eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .cover-eyebrow::after {
+    content: '';
+    display: block;
+    height: 1px;
+    width: 60px;
+    background: var(--gold-dim);
+  }
+
+  .cover-title {
+    font-size: clamp(52px, 8vw, 82px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.0;
+    color: var(--warm);
+    margin-bottom: 10px;
+  }
+
+  .cover-title span {
+    color: var(--gold);
+  }
+
+  .cover-subtitle {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 48px;
+  }
+
+  .cover-meta {
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+    gap: 0;
+    width: fit-content;
+    border: 1px solid var(--border);
+  }
+
+  .cover-meta-item {
+    padding: 10px 20px;
+    border-right: 1px solid var(--border);
+  }
+
+  .cover-meta-item:last-child { border-right: none; }
+
+  .cover-meta-label {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .cover-meta-value {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gold);
+  }
+
+  /* ─── PREAMBLE ───────────────────────────────────────────── */
+
+  .preamble {
+    padding: 52px 0 48px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .preamble-text {
+    font-size: 21px;
+    font-weight: 300;
+    line-height: 1.65;
+    color: var(--warm);
+    max-width: 680px;
+  }
+
+  .preamble-text em {
+    font-style: italic;
+    color: var(--gold);
+  }
+
+  /* ─── SECTIONS ───────────────────────────────────────────── */
+
+  .section {
+    padding: 52px 0 44px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section:last-child { border-bottom: none; }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  .section-number {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--gold);
+    min-width: 28px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .section-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .section-headline {
+    font-size: clamp(28px, 4vw, 38px);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--warm);
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+  }
+
+  .section-headline em {
+    font-style: italic;
+    color: var(--gold);
+    font-weight: 300;
+  }
+
+  p {
+    font-size: 16.5px;
+    font-weight: 300;
+    line-height: 1.75;
+    color: var(--text);
+    margin-bottom: 16px;
+    max-width: 680px;
+  }
+
+  p:last-child { margin-bottom: 0; }
+
+  strong {
+    font-weight: 500;
+    color: var(--warm);
+  }
+
+  /* ─── PIPELINE ───────────────────────────────────────────── */
+
+  .pipeline {
+    margin: 36px 0;
+    overflow-x: auto;
+  }
+
+  .pipeline-track {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 600px;
+  }
+
+  .pipeline-node {
+    flex: 1;
+    position: relative;
+  }
+
+  .pipeline-node-inner {
+    border: 1px solid var(--border);
+    border-right: none;
+    padding: 16px 12px 14px;
+    height: 100%;
+    position: relative;
+  }
+
+  .pipeline-node:last-child .pipeline-node-inner {
+    border-right: 1px solid var(--border);
+  }
+
+  .pipeline-node.is-ai .pipeline-node-inner {
+    border-color: var(--gold-dim);
+    background: rgba(200, 168, 74, 0.04);
+  }
+
+  .pipeline-node-stage {
+    font-family: var(--mono);
+    font-size: 7.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .pipeline-node-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--warm);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .pipeline-node.is-ai .pipeline-node-name {
+    color: var(--gold);
+  }
+
+  .pipeline-node-desc {
+    font-size: 11.5px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .pipeline-type {
+    font-family: var(--mono);
+    font-size: 7px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 10px;
+    display: inline-block;
+    padding: 2px 6px;
+    border: 1px solid var(--dim);
+    color: var(--muted);
+  }
+
+  .pipeline-node.is-ai .pipeline-type {
+    border-color: var(--gold-dim);
+    color: var(--gold-dim);
+  }
+
+  /* ─── LENSES ─────────────────────────────────────────────── */
+
+  .lenses-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin: 32px 0;
+  }
+
+  .lens-item {
+    background: var(--bg);
+    padding: 18px 20px;
+  }
+
+  .lens-number {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--gold-dim);
+    margin-bottom: 4px;
+  }
+
+  .lens-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--warm);
+    margin-bottom: 4px;
+  }
+
+  .lens-domain {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* ─── MODES ──────────────────────────────────────────────── */
+
+  .modes-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin: 32px 0;
+  }
+
+  .mode-item {
+    background: var(--bg);
+    padding: 16px 18px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .mode-index {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--gold-dim);
+    min-width: 18px;
+    padding-top: 2px;
+  }
+
+  .mode-body {}
+
+  .mode-name {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--gold);
+    margin-bottom: 4px;
+  }
+
+  .mode-desc {
+    font-size: 12.5px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ─── SPECS ──────────────────────────────────────────────── */
+
+  .specs-block {
+    border: 1px solid var(--border);
+    margin: 32px 0;
+    font-family: var(--mono);
+  }
+
+  .specs-row {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .specs-row:last-child { border-bottom: none; }
+
+  .specs-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 13px 18px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+  }
+
+  .specs-value {
+    font-size: 12px;
+    color: var(--warm);
+    padding: 13px 18px;
+    display: flex;
+    align-items: center;
+  }
+
+  .specs-value.accent { color: var(--gold); }
+
+  /* ─── NOT LIST ───────────────────────────────────────────── */
+
+  .not-list {
+    margin: 28px 0;
+    border-left: 2px solid var(--dim);
+    padding-left: 24px;
+  }
+
+  .not-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+    font-size: 15px;
+    color: var(--text);
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .not-item:last-child { border-bottom: none; }
+
+  .not-mark {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--red);
+    letter-spacing: 0.05em;
+    min-width: 24px;
+    padding-top: 2px;
+  }
+
+  /* ─── CLOSING ────────────────────────────────────────────── */
+
+  .closing-block {
+    border: 1px solid var(--gold-dim);
+    padding: 40px 44px;
+    margin-top: 12px;
+    background: rgba(200, 168, 74, 0.03);
+    position: relative;
+  }
+
+  .closing-block::before {
+    content: 'SUMMARY STATEMENT';
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.25em;
+    color: var(--gold-dim);
+    position: absolute;
+    top: -1px;
+    left: 20px;
+    background: var(--bg);
+    padding: 0 8px;
+    transform: translateY(-50%);
+  }
+
+  .closing-statement {
+    font-size: 22px;
+    font-weight: 300;
+    line-height: 1.6;
+    color: var(--warm);
+    font-style: italic;
+    max-width: 640px;
+  }
+
+  .closing-statement strong {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--gold);
+  }
+
+  /* ─── FOOTER ─────────────────────────────────────────────── */
+
+  .footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-text {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  /* ─── CALLOUT ────────────────────────────────────────────── */
+
+  .callout {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin: 32px 0;
+  }
+
+  .callout-item {
+    background: var(--surface);
+    padding: 22px 20px;
+    text-align: center;
+  }
+
+  .callout-number {
+    font-size: 42px;
+    font-weight: 600;
+    color: var(--gold);
+    line-height: 1;
+    margin-bottom: 6px;
+    font-family: var(--serif);
+  }
+
+  .callout-label {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ─── ANIMATIONS ─────────────────────────────────────────── */
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .cover, .preamble, .section {
+    animation: fadeUp 0.6s ease both;
+  }
+
+  .cover     { animation-delay: 0.05s; }
+  .preamble  { animation-delay: 0.15s; }
+  .section:nth-child(3) { animation-delay: 0.20s; }
+  .section:nth-child(4) { animation-delay: 0.25s; }
+  .section:nth-child(5) { animation-delay: 0.30s; }
+  .section:nth-child(6) { animation-delay: 0.32s; }
+  .section:nth-child(7) { animation-delay: 0.34s; }
+  .section:nth-child(8) { animation-delay: 0.36s; }
+
+  @media (max-width: 640px) {
+    .page { padding: 0 20px 80px; }
+    .cover-meta { grid-template-columns: 1fr 1fr; }
+    .cover-meta-item:nth-child(2) { border-right: none; }
+    .lenses-grid, .modes-grid { grid-template-columns: 1fr; }
+    .callout { grid-template-columns: 1fr 1fr; }
+    .specs-row { grid-template-columns: 1fr; }
+    .specs-label { border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══════════════════════════════════════════ COVER -->
+  <header class="cover">
+    <div class="cover-eyebrow">Technical Reference Manual</div>
+    <h1 class="cover-title">Committee<span> OS</span></h1>
+    <p class="cover-subtitle">Decision Engine &nbsp;·&nbsp; Architecture v2.0</p>
+    <div class="cover-meta">
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Document Type</span>
+        <span class="cover-meta-value">TRM-001</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Version</span>
+        <span class="cover-meta-value">2.0</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Issued</span>
+        <span class="cover-meta-value">2026-05-28</span>
+      </div>
+      <div class="cover-meta-item">
+        <span class="cover-meta-label">Status</span>
+        <span class="cover-meta-value">OPERATIVE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════ PREAMBLE -->
+  <section class="preamble">
+    <p class="preamble-text">
+      Committee OS is a deterministic decision engine. It accepts a mission, processes data through structured logical stages, and produces distilled, actionable output. <em>The intelligence lives in the architecture.</em> Artificial intelligence is the finishing step — not the motor.
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §01 WHAT IT DOES -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">01</span>
+      <span class="section-title">Product Overview</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">A decision engine that does <em>not</em> guess.</h2>
+    <p>
+      Every organisation processes a continuous flood of signals — content, code, customer voice, market data, security events. Most systems hand that flood to a language model and ask it to decide. Committee OS does not. It applies deterministic logic to every stage of that process, scoring and ranking inputs against a structured rubric before a single AI call is ever made.
+    </p>
+    <p>
+      The result is a system with structural integrity: predictable, auditable, and reproducible. When Committee OS surfaces a recommendation, that recommendation is traceable to a score, a criterion, a rule — not to the probabilistic output of a model left to its own devices.
+    </p>
+
+    <div class="callout">
+      <div class="callout-item">
+        <div class="callout-number">7</div>
+        <div class="callout-label">Pipeline Stages</div>
+      </div>
+      <div class="callout-item">
+        <div class="callout-number">14</div>
+        <div class="callout-label">Domain Modes</div>
+      </div>
+      <div class="callout-item">
+        <div class="callout-number">8</div>
+        <div class="callout-label">Scoring Lenses</div>
+      </div>
+      <div class="callout-item">
+        <div class="callout-number">2</div>
+        <div class="callout-label">Max AI Calls<br>Per Run</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §02 THE PIPELINE -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">02</span>
+      <span class="section-title">Operating Principle</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">Seven stages. Six of them run without <em>asking a model anything.</em></h2>
+    <p>
+      Data enters through a defined ingest channel and moves through a strict sequence of transformations. Each stage has a contract: a defined input, a defined output, and a defined failure behavior. No stage may pass ambiguous data to the next. No stage may infer what it cannot verify.
+    </p>
+
+    <div class="pipeline">
+      <div class="pipeline-track">
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 0</div>
+            <span class="pipeline-node-name">MISSION</span>
+            <div class="pipeline-node-desc">Operator defines objective, domain mode, and calibration parameters.</div>
+            <span class="pipeline-type">Human Input</span>
+          </div>
+        </div>
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 1</div>
+            <span class="pipeline-node-name">INGEST</span>
+            <div class="pipeline-node-desc">Raw data received and registered. No transformation. No interpretation.</div>
+            <span class="pipeline-type">Deterministic</span>
+          </div>
+        </div>
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 2</div>
+            <span class="pipeline-node-name">PARSE</span>
+            <div class="pipeline-node-desc">Content broken into discrete, typed units by rule — not inference.</div>
+            <span class="pipeline-type">Deterministic</span>
+          </div>
+        </div>
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 3</div>
+            <span class="pipeline-node-name">FILTER</span>
+            <div class="pipeline-node-desc">Noise removed by explicit rules. If no rule exists for a case, the unit passes.</div>
+            <span class="pipeline-type">Deterministic</span>
+          </div>
+        </div>
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 4</div>
+            <span class="pipeline-node-name">WEIGH</span>
+            <div class="pipeline-node-desc">Each unit scored against eight lens rubrics. Aggregated into a single ranked float.</div>
+            <span class="pipeline-type">Deterministic</span>
+          </div>
+        </div>
+        <div class="pipeline-node is-ai">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 5</div>
+            <span class="pipeline-node-name">DELIBERATE</span>
+            <div class="pipeline-node-desc">The only AI stage. Pre-scored structured data handed to synthesis engine.</div>
+            <span class="pipeline-type">AI — Bounded</span>
+          </div>
+        </div>
+        <div class="pipeline-node">
+          <div class="pipeline-node-inner">
+            <div class="pipeline-node-stage">Stage 6</div>
+            <span class="pipeline-node-name">OUTPUT</span>
+            <div class="pipeline-node-desc">Validated recommendations assembled and delivered in three ranked slots.</div>
+            <span class="pipeline-type">Deterministic</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p>
+      The AI worker at Stage 5 receives only structured, pre-scored data. It does not ingest raw content. It does not assign scores. It synthesises rankings that the deterministic pipeline has already established — and its output is validated against a hard contract before the pipeline proceeds.
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §03 EVALUATION FRAMEWORK -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">03</span>
+      <span class="section-title">Evaluation Framework</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">Eight lenses. Every unit scored against all of them — <em>always.</em></h2>
+    <p>
+      The rubric is the engine. Every content unit that passes filtration is scored against eight independent evaluation lenses, each derived from a distinct professional domain. Scoring is computational: each criterion within a lens resolves to a binary signal. The lens score is a ratio. The aggregate score is a weighted mean. No lens is ever silenced; the operator may amplify up to three per session.
+    </p>
+
+    <div class="lenses-grid">
+      <div class="lens-item">
+        <div class="lens-number">L-01</div>
+        <div class="lens-name">Creative Director</div>
+        <div class="lens-domain">Originality, format signal, narrative potential, brand recognition</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-02</div>
+        <div class="lens-name">Financial Director</div>
+        <div class="lens-domain">Cost implication, ROI signal, resource mention, expenditure risk</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-03</div>
+        <div class="lens-name">Technical Director</div>
+        <div class="lens-domain">Feasibility, dependency, implementation complexity, process integrity</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-04</div>
+        <div class="lens-name">Marketing Director</div>
+        <div class="lens-domain">Reach, positioning, platform relevance, audience signal</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-05</div>
+        <div class="lens-name">Audience Retention</div>
+        <div class="lens-domain">Comprehension, skill transfer, practical value, pain point alignment</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-06</div>
+        <div class="lens-name">Chief Executor</div>
+        <div class="lens-domain">Actionability, decision-readiness, operational fit, pipeline progression</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-07</div>
+        <div class="lens-name">Archivist</div>
+        <div class="lens-domain">Reference value, categorical clarity, institutional retrievability</div>
+      </div>
+      <div class="lens-item">
+        <div class="lens-number">L-08</div>
+        <div class="lens-name">Legal &amp; QA</div>
+        <div class="lens-domain">Risk flag, compliance signal, contradiction detection, content integrity</div>
+      </div>
+    </div>
+
+    <p>
+      Lens weights live in configuration — not in prompts. Adjusting the evaluation emphasis of a deployment requires a configuration edit, not a conversation with a model.
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §04 DOMAIN MODES -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">04</span>
+      <span class="section-title">Domain Configurations</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">Fourteen operational modes. <em>One architecture.</em></h2>
+    <p>
+      Committee OS ships with fourteen domain-specific configurations. Each mode defines accepted ingest formats, domain filter rules, peer-review scoring roles, and lens weight modifiers tuned to the operational context. The pipeline structure does not change between modes. Only the parameters do.
+    </p>
+
+    <div class="modes-grid">
+      <div class="mode-item">
+        <span class="mode-index">01</span>
+        <div class="mode-body">
+          <div class="mode-name">educational_academy</div>
+          <div class="mode-desc">Curriculum-aligned instructional delivery and student assessment automation</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">02</span>
+        <div class="mode-body">
+          <div class="mode-name">content_syndicate</div>
+          <div class="mode-desc">High-velocity, trend-responsive media production and quality assurance</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">03</span>
+        <div class="mode-body">
+          <div class="mode-name">secops_triager</div>
+          <div class="mode-desc">Silent digital perimeter watch producing structured forensic incident briefs</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">04</span>
+        <div class="mode-body">
+          <div class="mode-name">code_guard</div>
+          <div class="mode-desc">Automated gatekeeper for pull requests, diffs, and package dependencies</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">05</span>
+        <div class="mode-body">
+          <div class="mode-name">video_narrative_engine</div>
+          <div class="mode-desc">Trend-to-script translation producing ranked multimedia presentation candidates</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">06</span>
+        <div class="mode-body">
+          <div class="mode-name">customer_voc_synthesizer</div>
+          <div class="mode-desc">Compresses fractured customer touchpoints into high-priority engineering objectives</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">07</span>
+        <div class="mode-body">
+          <div class="mode-name">product_listing_machine</div>
+          <div class="mode-desc">Scales e-commerce listing deployments from raw supplier data packages</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">08</span>
+        <div class="mode-body">
+          <div class="mode-name">real_estate_qualifier</div>
+          <div class="mode-desc">Filters public property records to locate undervalued acquisition opportunities</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">09</span>
+        <div class="mode-body">
+          <div class="mode-name">patch_guard</div>
+          <div class="mode-desc">Secure intermediary between upstream package registries and production dependencies</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">10</span>
+        <div class="mode-body">
+          <div class="mode-name">digital_archival_processor</div>
+          <div class="mode-desc">Cleans and categorises raw OCR and document scan dumps into indexed repositories</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">11</span>
+        <div class="mode-body">
+          <div class="mode-name">network_flow_hunter</div>
+          <div class="mode-desc">Continuous inspection of network flows for command-and-control or exfiltration activity</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">12</span>
+        <div class="mode-body">
+          <div class="mode-name">market_sentiment_aggregator</div>
+          <div class="mode-desc">Isolates actionable quantitative shifts from earnings transcripts and financial filings</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">13</span>
+        <div class="mode-body">
+          <div class="mode-name">telemetry_diagnostic_loop</div>
+          <div class="mode-desc">Preventative maintenance controller for remote hardware, industrial systems, and server arrays</div>
+        </div>
+      </div>
+      <div class="mode-item">
+        <span class="mode-index">14</span>
+        <div class="mode-body">
+          <div class="mode-name">lit_review_examiner</div>
+          <div class="mode-desc">Accelerates scientific discovery by synthesising and auditing newly published research</div>
+        </div>
+      </div>
+    </div>
+
+    <p>
+      The architecture is extensible. Additional domain modes may be introduced by adding an entry to the configuration file. The core pipeline does not require modification.
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §05 TECHNICAL SPECIFICATIONS -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">05</span>
+      <span class="section-title">Technical Specifications</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">Every operational parameter is a <em>number in a file.</em></h2>
+
+    <div class="specs-block">
+      <div class="specs-row">
+        <span class="specs-label">Pipeline Stages</span>
+        <span class="specs-value">7 (Stages 0–6)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">AI Calls — Hard Ceiling</span>
+        <span class="specs-value accent">2 per run (config.json: max_ai_calls_per_run)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">AI Workers</span>
+        <span class="specs-value">Gemini (formatter, Stage 5 pre-pass) · Qwen (deliberation, Stage 5 synthesis)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Gate Threshold</span>
+        <span class="specs-value accent">0.55 aggregate score (configurable)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Units to Deliberation</span>
+        <span class="specs-value">Top 5 by aggregate score</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Output Slots</span>
+        <span class="specs-value accent">3 (1A · 2A · 3A) — always exactly 3, never partial</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Lens Weight — Default</span>
+        <span class="specs-value">1.0 (all lenses equal by default)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Lens Weight — Amplified</span>
+        <span class="specs-value">1.5× (up to 3 operator-selected lenses per session)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Lens Weight — Floor</span>
+        <span class="specs-value">0.5 (no lens may be silenced)</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Ingestion Modes</span>
+        <span class="specs-value">Shishi-odoshi (passive accumulation) · Direct · Hybrid</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Data Persistence</span>
+        <span class="specs-value">SQLite · 8 stage-owned tables · append-only log</span>
+      </div>
+      <div class="specs-row">
+        <span class="specs-label">Partial Output</span>
+        <span class="specs-value accent">Prohibited. Validation failure halts pipeline. Operator decides on re-run.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §06 SYSTEM INTEGRITY -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">06</span>
+      <span class="section-title">System Integrity</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">What this system is <em>not</em> is as important as what it is.</h2>
+    <p>
+      The market is saturated with systems that substitute parallel AI calls for structured reasoning. Committee OS was designed explicitly in opposition to that pattern. The following are architectural violations — conditions that, if present in any implementation, render it non-compliant.
+    </p>
+
+    <div class="not-list">
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>A prompt chain — multiple open-ended AI calls substituting for deterministic logic</span>
+      </div>
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>Self-scoring — any AI model evaluating its own output at any stage</span>
+      </div>
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>Prompt-embedded thresholds — scores or weights defined inside a prompt string</span>
+      </div>
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>Silent gap-filling — any component inferring missing data rather than flagging it</span>
+      </div>
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>Scope creep — any AI worker performing tasks outside their defined stage</span>
+      </div>
+      <div class="not-item">
+        <span class="not-mark">✕</span>
+        <span>Unvalidated output — any AI response passed downstream before contract validation</span>
+      </div>
+    </div>
+
+    <p>
+      These constraints are not aspirational. They are enforced at the architectural level. The AI budget ceiling is a hard integer in configuration. Violating it halts the pipeline regardless of run state. No further AI calls are permitted in that run.
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ §07 CLOSING -->
+  <section class="section">
+    <div class="section-header">
+      <span class="section-number">07</span>
+      <span class="section-title">Deployment Position</span>
+      <div class="section-rule"></div>
+    </div>
+    <h2 class="section-headline">Built for organisations where <em>decisions have consequences.</em></h2>
+    <p>
+      Committee OS is not a feature. It is infrastructure. It is appropriate for any operational context where the volume of incoming signals exceeds the bandwidth of human attention, where the cost of a bad recommendation is real, and where traceability and auditability are not optional.
+    </p>
+    <p>
+      It runs in fourteen domains out of the box — from security operations to academic research synthesis, from financial intelligence to content production — and extends to new domains without modifying the core pipeline. It surfaces three ranked, validated recommendations per run, every time, with a full audit trail from raw input to final output.
+    </p>
+
+    <div class="closing-block">
+      <p class="closing-statement">
+        "Most AI systems are powerful but unpredictable. Committee OS is the inverse proposition: a system whose <strong>structural integrity does not depend on the model</strong> — because the architecture was built to be the reliable one."
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════ FOOTER -->
+  <footer class="footer">
+    <span class="footer-text">Committee OS &nbsp;·&nbsp; Decision Engine &nbsp;·&nbsp; TRM-001 &nbsp;·&nbsp; v2.0</span>
+    <span class="footer-text">Architecture is Law &nbsp;·&nbsp; 2026</span>
+  </footer>
+
+</div>
+</body>
+</html>

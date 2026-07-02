@@ -1,0 +1,26 @@
+{
+  "gate_threshold": 0.55,
+  "max_ai_calls_per_run": 2,
+  "qwen_max_tokens": 4096,
+  "gemini_max_tokens": 8500,
+  "qwen_retry_max": 3,
+  "qwen_retry_backoff_ms": [15000, 30000, 60000],
+  "qwen_request_min_interval_ms": 20000,
+  "qwen_429_type_check": true,
+  "parse_min_length": "user_defined",
+  "top_units_to_deliberation": 5,
+  "lens_weight_default": 1.0,
+  "lens_weight_amplified": 1.5,
+  "lens_weight_floor": 0.5,
+  "user_emphasis_max_selections": 3,
+  "lens_weights": {
+    "creative_director": 1.0,
+    "financial_director": 1.0,
+    "technical_director": 1.0,
+    "marketing_director": 1.0,
+    "audience_retention": 1.0,
+    "chief_executor": 1.0,
+    "archivist": 1.0,
+    "legal_qa": 1.0
+  }
+}
