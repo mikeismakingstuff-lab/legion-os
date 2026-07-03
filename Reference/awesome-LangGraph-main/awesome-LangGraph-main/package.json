@@ -1,0 +1,14 @@
+{
+  "name": "awesome-langgraph-maintenance",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lightweight maintenance tooling for awesome-LangGraph",
+  "scripts": {
+    "check:repo-checks": "node scripts/repo-checks.mjs",
+    "lint:awesome": "npx awesome-lint README.md",
+    "lint:md": "npx markdownlint-cli README.md CONTRIBUTING.md"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

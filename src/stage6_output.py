@@ -119,15 +119,63 @@ def _validate_deliberation_output(output: dict) -> str | None:
 # ──────────────────────────────────────────────────────────────
 
 def generate_pipeline_output(
-    deliberation_output: dict,
+    mission_id: str,
     db_path: Path | None = None,
 ) -> dict:
-    """Generate the final pipeline output from Qwen deliberation results."""
+    """Generate the final pipeline output by reading deliberation results from SQLite.
+
+    Reads the most recent deliberation_results row for mission_id, validates it,
+    then maps slots, fetches unit content, queries pipeline metrics, and persists
+    to pipeline_outputs.
+    """
+    if not isinstance(mission_id, str):
+        raise TypeError(
+            f"mission_id must be a string, got {type(mission_id).__name__}."
+        )
+
     conn = get_connection(db_path)
     try:
+        # ── 0. Re-read deliberation results from DB (DB-as-contract) ─────────
+        row = conn.execute(
+            """
+            SELECT deliberation_id, recommendations, flags
+            FROM deliberation_results
+            WHERE mission_id = ?
+            ORDER BY rowid DESC
+            LIMIT 1
+            """,
+            (mission_id,),
+        ).fetchone()
+
+        if row is None:
+            _log(conn, mission_id, "pipeline_halt",
+                 f"No deliberation_results found for mission_id '{mission_id}'.")
+            conn.commit()
+            raise ValueError(
+                f"No deliberation_results found for mission_id '{mission_id}'."
+            )
+
+        try:
+            recommendations = json.loads(row["recommendations"])
+            flags = json.loads(row["flags"])
+        except json.JSONDecodeError as exc:
+            _log(conn, mission_id, "pipeline_halt",
+                 f"Malformed JSON in deliberation_results: {exc}")
+            conn.commit()
+            raise ValueError(
+                f"Malformed JSON in deliberation_results for "
+                f"mission_id '{mission_id}': {exc}"
+            )
+
+        # Reconstruct deliberation_output dict for the existing validation helper
+        deliberation_output = {
+            "mission_id": mission_id,
+            "recommendations": recommendations,
+            "flags": flags,
+        }
+
         # ── 1. Validate Deliberation Output ───────────────────
         validation_err = _validate_deliberation_output(deliberation_output)
-        mission_id = deliberation_output.get("mission_id", "unknown-mission")
 
         if validation_err is not None:
             _log(conn, mission_id, "pipeline_halt", f"Validation failed: {validation_err}")
@@ -135,6 +183,7 @@ def generate_pipeline_output(
             raise ValueError(f"Deliberation output validation failed: {validation_err}")
 
         _log(conn, mission_id, "stage_start", "Generating final pipeline output.")
+
 
         # ── 2. Map recommendations & Retrieve content ─────────
         slots = {}

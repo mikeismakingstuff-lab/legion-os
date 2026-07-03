@@ -226,11 +226,13 @@ def parse_ingest_record(
     -------
     List of parsed unit dicts, or a single-element list with an error dict.
     """
+    from src.compression_engine import compression_engine
+
     conn = get_connection(db_path)
     try:
-        # Fetch the ingest record
+        # Check if the ingest record exists and is received
         row = conn.execute(
-            "SELECT raw_content FROM ingest_records "
+            "SELECT status FROM ingest_records "
             "WHERE ingest_id = ? AND status = 'received'",
             (ingest_id,),
         ).fetchone()
@@ -238,7 +240,8 @@ def parse_ingest_record(
         if row is None:
             return [{"error": f"ingest_id '{ingest_id}' not found or not 'received'."}]
 
-        raw_content = row["raw_content"]
+        # Retrieve uncompressed content (decompressing if necessary)
+        raw_content = compression_engine.retrieve_uncompressed(ingest_id, db_path)
 
         _log(conn, mission_id, "stage_start",
              f"Parsing ingest_id: {ingest_id}")

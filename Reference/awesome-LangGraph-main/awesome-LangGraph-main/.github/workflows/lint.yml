@@ -1,0 +1,44 @@
+name: Lint README
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - '.markdownlint.json'
+      - 'package.json'
+      - '.github/workflows/lint.yml'
+  workflow_dispatch:
+
+jobs:
+  awesome-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Run awesome-lint
+        run: npm run lint:awesome
+
+  markdown-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Run markdownlint
+        run: npm run lint:md

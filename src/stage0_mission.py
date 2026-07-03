@@ -170,3 +170,43 @@ def create_mission(
         conn.close()
 
     return record
+
+
+class SourceMapper:
+    @staticmethod
+    def map_mission_to_sources(
+        mission_statement: str,
+        domain: str,
+        db_path: Path | None = None,
+    ) -> list[str]:
+        """Deterministically map a mission statement and domain to prioritized URLs.
+
+        Keyword matching logic:
+          - '*' matches any mission statement
+          - Otherwise, keyword must be contained in the mission statement (case-insensitive)
+        Sorted by priority ascending (lower number = higher priority).
+        """
+        conn = get_connection(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT keyword, url, priority FROM source_registry WHERE domain = ?",
+                (domain,),
+            )
+            rows = cursor.fetchall()
+
+            matches = []
+            statement_lower = mission_statement.lower()
+
+            for row in rows:
+                keyword = row[0]
+                url = row[1]
+                priority = row[2]
+
+                if keyword == "*" or keyword.lower() in statement_lower:
+                    matches.append((url, priority))
+
+            # Sort by priority ascending
+            matches.sort(key=lambda x: x[1])
+            return [m[0] for m in matches]
+        finally:
+            conn.close()

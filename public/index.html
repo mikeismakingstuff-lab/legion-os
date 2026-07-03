@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEGION OS — Control Center</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts for premium typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Banner (Header) -->
+        <header class="header-banner">
+            <div class="branding">
+                <div class="logo-icon"></div>
+                <h1 class="logo-text">LEGION</h1>
+            </div>
+            
+            <div class="system-monitor">
+                <div class="monitor-title">System Monitor</div>
+                <div class="monitor-stats">
+                    <div class="gauge-container">
+                        <svg class="gauge" viewBox="0 0 36 36">
+                            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path id="cpu-fill" class="gauge-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        </svg>
+                        <div class="gauge-label">CPU <span id="cpu-val">0%</span></div>
+                    </div>
+                    <div class="gauge-container">
+                        <svg class="gauge" viewBox="0 0 36 36">
+                            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path id="ram-fill" class="gauge-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        </svg>
+                        <div class="gauge-label">RAM <span id="ram-val">0%</span></div>
+                    </div>
+                    <div class="latency-container">
+                        <div class="latency-label">Latency</div>
+                        <div class="latency-sparkline">
+                            <canvas id="latency-canvas" width="80" height="20"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="token-monitor">
+                <div class="monitor-title">Token Monitor</div>
+                <div class="token-stats">
+                    <div class="token-numbers">
+                        Tokens: <span id="token-count">0</span> / <span id="token-limit">500,000</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="token-progress" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Columns -->
+        <main class="dashboard-grid">
+            <!-- Column 1: Files -->
+            <section class="panel files-panel">
+                <h2 class="panel-header">Files</h2>
+                <div class="panel-content">
+                    <div id="file-tree" class="file-tree">
+                        <!-- Populated dynamically -->
+                        <div class="tree-loading">Loading workspace...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Column 2: Document Preview Frame -->
+            <section class="panel preview-panel">
+                <h2 class="panel-header">Document Preview Frame</h2>
+                <div class="panel-content">
+                    <div id="preview-container" class="preview-container">
+                        <div class="preview-placeholder">Select a file from the tree to preview content.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Column 3: AI Chat Core -->
+            <section class="panel chat-panel">
+                <h2 class="panel-header">AI Chat</h2>
+                <div class="panel-content chat-layout">
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="message system">
+                            <div class="message-sender">Legion AI</div>
+                            <div class="message-text">System initialized. Ready for command ingestion.</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" placeholder="Enter your message..." autocomplete="off">
+                        <button id="chat-send-btn" class="btn-primary">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Column 4: Utility Panel & Community -->
+            <section class="panel utility-panel">
+                <h2 class="panel-header">Utility Panel</h2>
+                <div class="panel-content utility-layout">
+                    <!-- Top: Notepad -->
+                    <div class="notepad-container">
+                        <div class="notepad-toolbar">
+                            <button class="toolbar-btn" data-format="bold" title="Bold">B</button>
+                            <button class="toolbar-btn" data-format="italic" title="Italic">I</button>
+                            <button class="toolbar-btn" data-format="link" title="Link">Link</button>
+                            <button class="toolbar-btn" data-format="code" title="Code">Code</button>
+                            <button class="toolbar-btn" data-format="list" title="Bullet List">List</button>
+                        </div>
+                        <textarea id="notepad-textarea" placeholder="Clean notepad scratchpad for real-time note-taking..."></textarea>
+                    </div>
+                    <!-- Bottom: Community -->
+                    <div class="community-container">
+                        <div class="community-header">Active Community</div>
+                        <div class="community-widget">
+                            <div class="discord-mock">
+                                <div class="discord-sidebar">
+                                    <div class="discord-server-icon active">L</div>
+                                    <div class="discord-server-icon">+</div>
+                                </div>
+                                <div class="discord-channels">
+                                    <div class="channel active"># general</div>
+                                    <div class="channel"># announcements</div>
+                                    <div class="channel"># dev-chat</div>
+                                </div>
+                                <div class="discord-chat-area">
+                                    <div class="discord-messages">
+                                        <div class="discord-msg">
+                                            <span class="user">mims</span>: UI layout looks solid!
+                                        </div>
+                                        <div class="discord-msg">
+                                            <span class="user">cynic</span>: Need to watch memory bounds.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="scripts.js"></script>
+</body>
+</html>

@@ -318,3 +318,89 @@ def get_pending_count(
         return row["cnt"]
     finally:
         conn.close()
+
+
+def ingest_from_urls(
+    mission_id: str,
+    urls: list[str],
+    db_path: Path | None = None,
+) -> list[dict]:
+    """Scrape URLs, convert to clean text via MarkItDown, and ingest them.
+
+    If a URL is unreachable or empty, logs the failure and skips it.
+    """
+    import tempfile
+    import requests
+    from bs4 import BeautifulSoup
+    from markitdown import MarkItDown
+
+    results = []
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/115.0.0.0 Safari/537.36"
+        )
+    }
+
+    md = MarkItDown()
+
+    for url in urls:
+        try:
+            # Fetch content
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            html = resp.text
+
+            if not html.strip():
+                raise ValueError("Empty response content")
+
+            # Clean HTML with BeautifulSoup
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.decompose()
+            cleaned_html = str(soup)
+
+            # Convert to Markdown via MarkItDown using a temp file
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(cleaned_html)
+                temp_path = Path(f.name)
+
+            try:
+                converted = md.convert(str(temp_path))
+                text_content = converted.text_content
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+            if not text_content.strip():
+                raise ValueError("Converted text content is empty")
+
+            # Ingest the clean text
+            record = ingest_record(
+                mission_id=mission_id,
+                source=url,
+                format="markdown",
+                raw_content=text_content,
+                db_path=db_path,
+            )
+            if "error" not in record:
+                results.append(record)
+            else:
+                # Log ingestion error
+                conn = get_connection(db_path)
+                try:
+                    _log(conn, mission_id, "ai_error", f"Failed to ingest URL {url}: {record['error']}", "ingest_error")
+                    conn.commit()
+                finally:
+                    conn.close()
+
+        except Exception as exc:
+            # Log failure, skip, do not halt
+            conn = get_connection(db_path)
+            try:
+                _log(conn, mission_id, "ai_error", f"Failed to scrape URL {url}: {exc}", "scrape_error")
+                conn.commit()
+            finally:
+                conn.close()
+
+    return results

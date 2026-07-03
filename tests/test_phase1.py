@@ -179,7 +179,7 @@ class TestSchema:
         )
         tables = [row[0] for row in cursor.fetchall()]
         conn.close()
-        assert len(tables) == 8
+        assert len(tables) == 13
 
 
 # ═══════════════════════════════════════════════════════════════
