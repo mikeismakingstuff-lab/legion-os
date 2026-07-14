@@ -1,147 +1,226 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEGION OS — Control Center</title>
+    <title>Legion OS — Control Center</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- Google Fonts for premium typography -->
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@400;600&display=swap"
+        rel="stylesheet">
 </head>
+
 <body>
-    <div class="dashboard-container">
-        <!-- Top Banner (Header) -->
-        <header class="header-banner">
-            <div class="branding">
-                <div class="logo-icon"></div>
-                <h1 class="logo-text">LEGION</h1>
+
+    <header>
+        <div class="title">LEGION OS // CONTROL CENTER</div>
+    </header>
+
+    <main id="main-grid">
+        <!-- Left Column -->
+        <div class="col col-left" id="col-left">
+            <!-- File Explorer -->
+            <div class="panel file-explorer-panel" id="panel-files">
+                <div class="file-explorer-header">
+                    <h2>File Explorer</h2>
+                </div>
+                <div class="file-explorer-content">
+                    <div class="file-tree-container">
+                        <div class="tree-header">WORKSPACE</div>
+                        <div class="tree" id="file-tree"></div>
+                    </div>
+                    <div class="file-preview-container">
+                        <div class="preview-header">PREVIEW</div>
+                        <div class="preview-content" id="preview-content">
+                            <div class="preview-placeholder">Select a file to preview...</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            
-            <div class="system-monitor">
-                <div class="monitor-title">System Monitor</div>
-                <div class="monitor-stats">
+
+            <div class="resizer resizer-row" data-target="col-left" data-index="1"></div>
+
+            <!-- System Monitor -->
+            <div class="panel system-panel" id="panel-system">
+                <h2>System Monitor</h2>
+                <div class="gauges">
                     <div class="gauge-container">
-                        <svg class="gauge" viewBox="0 0 36 36">
-                            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path id="cpu-fill" class="gauge-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <svg class="gauge" viewBox="0 0 100 100">
+                            <circle class="gauge-bg" cx="50" cy="50" r="45"></circle>
+                            <circle class="gauge-fill" id="cpu-fill" cx="50" cy="50" r="45" stroke-dasharray="0, 100">
+                            </circle>
                         </svg>
-                        <div class="gauge-label">CPU <span id="cpu-val">0%</span></div>
+                        <div class="gauge-label">CPU<br><span id="cpu-val">0%</span></div>
                     </div>
                     <div class="gauge-container">
-                        <svg class="gauge" viewBox="0 0 36 36">
-                            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path id="ram-fill" class="gauge-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <svg class="gauge" viewBox="0 0 100 100">
+                            <circle class="gauge-bg" cx="50" cy="50" r="45"></circle>
+                            <circle class="gauge-fill" id="ram-fill" cx="50" cy="50" r="45" stroke-dasharray="0, 100">
+                            </circle>
                         </svg>
-                        <div class="gauge-label">RAM <span id="ram-val">0%</span></div>
+                        <div class="gauge-label">RAM<br><span id="ram-val">0%</span></div>
                     </div>
-                    <div class="latency-container">
-                        <div class="latency-label">Latency</div>
-                        <div class="latency-sparkline">
-                            <canvas id="latency-canvas" width="80" height="20"></canvas>
-                        </div>
+                </div>
+                <div class="stats">
+                    <div class="stat-row"><span>CPU TEMP</span><b id="cpu-temp">--°C</b></div>
+                    <div class="stat-row"><span>RAM TEMP</span><b id="ram-temp">--°C</b></div>
+                    <div class="stat-row"><span>DISK TEMP</span><b id="disk-temp">--°C</b></div>
+                </div>
+                <div class="net-status">
+                    <span>UPLINK: <b class="ok">SECURE</b></span>
+                    <span>LATENCY: <b id="latency-val">--ms</b></span>
+                </div>
+                <canvas class="latency-sparkline" id="latency-canvas" width="200" height="40"></canvas>
+            </div>
+
+            <div class="resizer resizer-row" data-target="col-left" data-index="3"></div>
+
+            <!-- NMT3S Chat -->
+            <div class="chat" id="chat-nmt3s">
+                <div class="chat-header">
+                    <h3>NMT3S</h3>
+                    <span class="sub-header">Ollama / Nemotron</span>
+                </div>
+                <div class="log" id="nmt3s-log"></div>
+                <div class="chat-input-wrapper">
+                    <span style="color:var(--cyan)">></span>
+                    <input type="text" id="nmt3s-input" placeholder="Query NMT3S..." autocomplete="off">
+                    <button class="send-btn" id="nmt3s-send">SEND</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vertical Resizer 1 -->
+        <div class="resizer resizer-col" data-target="main-grid" data-index="1"></div>
+
+        <!-- Center Column -->
+        <div class="col col-center" id="col-center">
+            <!-- Combined Session Chat -->
+            <div class="chat" id="chat-combined">
+                <div class="chat-header">
+                    <h3>Combined Session</h3>
+                    <span class="sub-header">Convergence Logic</span>
+                </div>
+                <div class="log" id="combined-log"></div>
+                <div class="chat-input-wrapper">
+                    <span style="color:var(--cyan)">></span>
+                    <input type="text" id="combined-input" placeholder="Initiate convergence..." autocomplete="off">
+                    <button class="send-btn" id="combined-send">SEND</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vertical Resizer 2 -->
+        <div class="resizer resizer-col" data-target="main-grid" data-index="3"></div>
+
+        <!-- Right Column -->
+        <div class="col col-right" id="col-right">
+            <!-- Graphics Panel (Globe + Convergence Logic) -->
+            <div class="panel graphics-panel" id="panel-graphics">
+                <h2>Network & Convergence</h2>
+                <div class="graphics-container" style="display: flex; flex-direction: column; gap: 10px; height: 100%;">
+                    <!-- Globe -->
+                    <div class="globe-wrap" style="flex: 1; position: relative;">
+                        <div class="status-line">NODE <b>07</b><br>ACTIVE</div>
+                        <div class="integrity">INTEGRITY<br><b>100%</b></div>
+                        <svg width="100%" height="100%" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <radialGradient id="globeGlow" cx="50%" cy="50%" r="50%">
+                                    <stop offset="80%" stop-color="rgba(95, 212, 227, 0)" />
+                                    <stop offset="100%" stop-color="rgba(95, 212, 227, 0.2)" />
+                                </radialGradient>
+                            </defs>
+                            <circle cx="100" cy="100" r="80" fill="url(#globeGlow)" stroke="var(--cyan)"
+                                stroke-width="1" opacity="0.5" />
+                            <ellipse cx="100" cy="100" rx="80" ry="30" fill="none" stroke="var(--cyan)"
+                                stroke-width="0.5" opacity="0.5" />
+                            <ellipse cx="100" cy="100" rx="30" ry="80" fill="none" stroke="var(--cyan)"
+                                stroke-width="0.5" opacity="0.5" />
+                            <path d="M 20 100 Q 100 150 180 100" fill="none" stroke="var(--cyan)" stroke-width="0.5"
+                                opacity="0.3" />
+                            <path d="M 20 100 Q 100 50 180 100" fill="none" stroke="var(--cyan)" stroke-width="0.5"
+                                opacity="0.3" />
+                            <!-- Data points -->
+                            <circle cx="70" cy="80" r="2" fill="var(--crimson)">
+                                <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite" />
+                            </circle>
+                            <circle cx="130" cy="120" r="2" fill="var(--cyan)">
+                                <animate attributeName="opacity" values="1;0.2;1" dur="3s" repeatCount="indefinite" />
+                            </circle>
+                            <circle cx="110" cy="60" r="2" fill="var(--cyan)">
+                                <animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite" />
+                            </circle>
+                        </svg>
+                    </div>
+                    <!-- Convergence Logic -->
+                    <div class="convergence-wrap" style="flex: 1; position: relative;">
+                        <svg width="100%" height="100%" viewBox="0 0 200 150" preserveAspectRatio="xMidYMid meet">
+                            <!-- Left Node (NMT3S) -->
+                            <rect x="20" y="50" width="40" height="40" fill="rgba(28, 44, 61, 0.8)" stroke="var(--cyan)"
+                                stroke-width="1" />
+                            <text x="40" y="75" fill="var(--cyan)" font-family="Share Tech Mono" font-size="10"
+                                text-anchor="middle">NMT3S</text>
+
+                            <!-- Right Node (AGVL1) -->
+                            <rect x="140" y="50" width="40" height="40" fill="rgba(28, 44, 61, 0.8)"
+                                stroke="var(--cyan)" stroke-width="1" />
+                            <text x="160" y="75" fill="var(--cyan)" font-family="Share Tech Mono" font-size="10"
+                                text-anchor="middle">AGVL1</text>
+
+                            <!-- Center Node (Convergence) -->
+                            <polygon points="100,20 120,50 100,80 80,50" fill="rgba(201, 66, 90, 0.2)"
+                                stroke="var(--crimson)" stroke-width="1" />
+                            <text x="100" y="53" fill="var(--crimson)" font-family="Share Tech Mono" font-size="8"
+                                text-anchor="middle">SYNC</text>
+
+                            <!-- Connecting Lines -->
+                            <path d="M 60 70 L 80 50" fill="none" stroke="var(--cyan)" stroke-width="1"
+                                stroke-dasharray="2,2">
+                                <animate attributeName="stroke-dashoffset" from="10" to="0" dur="1s"
+                                    repeatCount="indefinite" />
+                            </path>
+                            <path d="M 140 70 L 120 50" fill="none" stroke="var(--cyan)" stroke-width="1"
+                                stroke-dasharray="2,2">
+                                <animate attributeName="stroke-dashoffset" from="0" to="10" dur="1s"
+                                    repeatCount="indefinite" />
+                            </path>
+
+                            <!-- Output Line -->
+                            <path d="M 100 80 L 100 120" fill="none" stroke="var(--crimson)" stroke-width="2" />
+                            <rect x="70" y="120" width="60" height="20" fill="rgba(201, 66, 90, 0.1)"
+                                stroke="var(--crimson)" stroke-width="1" />
+                            <text x="100" y="133" fill="var(--text)" font-family="Share Tech Mono" font-size="10"
+                                text-anchor="middle">OUTPUT</text>
+                        </svg>
                     </div>
                 </div>
             </div>
 
-            <div class="token-monitor">
-                <div class="monitor-title">Token Monitor</div>
-                <div class="token-stats">
-                    <div class="token-numbers">
-                        Tokens: <span id="token-count">0</span> / <span id="token-limit">500,000</span>
-                    </div>
-                    <div class="progress-bar-container">
-                        <div id="token-progress" class="progress-bar-fill" style="width: 0%;"></div>
-                    </div>
+            <div class="resizer resizer-row" data-target="col-right" data-index="1"></div>
+
+            <!-- AGVL1 Chat -->
+            <div class="chat" id="chat-agvl1">
+                <div class="chat-header">
+                    <h3>AGVL1</h3>
+                    <span class="sub-header">Antigravity / The Engineer</span>
+                </div>
+                <div class="log" id="agvl1-log"></div>
+                <div class="chat-input-wrapper">
+                    <span style="color:var(--cyan)">></span>
+                    <input type="text" id="agvl1-input" placeholder="Query AGVL1..." autocomplete="off">
+                    <button class="send-btn" id="agvl1-send">SEND</button>
                 </div>
             </div>
-        </header>
+        </div>
+    </main>
 
-        <!-- Main Dashboard Columns -->
-        <main class="dashboard-grid">
-            <!-- Column 1: Files -->
-            <section class="panel files-panel">
-                <h2 class="panel-header">Files</h2>
-                <div class="panel-content">
-                    <div id="file-tree" class="file-tree">
-                        <!-- Populated dynamically -->
-                        <div class="tree-loading">Loading workspace...</div>
-                    </div>
-                </div>
-            </section>
+    <footer>
+        <div class="status">SYSTEM: <b>ONLINE</b></div>
+        <div class="version">LEGION OS v2.4.1</div>
+    </footer>
 
-            <!-- Column 2: Document Preview Frame -->
-            <section class="panel preview-panel">
-                <h2 class="panel-header">Document Preview Frame</h2>
-                <div class="panel-content">
-                    <div id="preview-container" class="preview-container">
-                        <div class="preview-placeholder">Select a file from the tree to preview content.</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Column 3: AI Chat Core -->
-            <section class="panel chat-panel">
-                <h2 class="panel-header">AI Chat</h2>
-                <div class="panel-content chat-layout">
-                    <div id="chat-messages" class="chat-messages">
-                        <div class="message system">
-                            <div class="message-sender">Legion AI</div>
-                            <div class="message-text">System initialized. Ready for command ingestion.</div>
-                        </div>
-                    </div>
-                    <div class="chat-input-container">
-                        <input type="text" id="chat-input" placeholder="Enter your message..." autocomplete="off">
-                        <button id="chat-send-btn" class="btn-primary">Send</button>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Column 4: Utility Panel & Community -->
-            <section class="panel utility-panel">
-                <h2 class="panel-header">Utility Panel</h2>
-                <div class="panel-content utility-layout">
-                    <!-- Top: Notepad -->
-                    <div class="notepad-container">
-                        <div class="notepad-toolbar">
-                            <button class="toolbar-btn" data-format="bold" title="Bold">B</button>
-                            <button class="toolbar-btn" data-format="italic" title="Italic">I</button>
-                            <button class="toolbar-btn" data-format="link" title="Link">Link</button>
-                            <button class="toolbar-btn" data-format="code" title="Code">Code</button>
-                            <button class="toolbar-btn" data-format="list" title="Bullet List">List</button>
-                        </div>
-                        <textarea id="notepad-textarea" placeholder="Clean notepad scratchpad for real-time note-taking..."></textarea>
-                    </div>
-                    <!-- Bottom: Community -->
-                    <div class="community-container">
-                        <div class="community-header">Active Community</div>
-                        <div class="community-widget">
-                            <div class="discord-mock">
-                                <div class="discord-sidebar">
-                                    <div class="discord-server-icon active">L</div>
-                                    <div class="discord-server-icon">+</div>
-                                </div>
-                                <div class="discord-channels">
-                                    <div class="channel active"># general</div>
-                                    <div class="channel"># announcements</div>
-                                    <div class="channel"># dev-chat</div>
-                                </div>
-                                <div class="discord-chat-area">
-                                    <div class="discord-messages">
-                                        <div class="discord-msg">
-                                            <span class="user">mims</span>: UI layout looks solid!
-                                        </div>
-                                        <div class="discord-msg">
-                                            <span class="user">cynic</span>: Need to watch memory bounds.
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
-    </div>
     <script src="scripts.js"></script>
 </body>
+
 </html>

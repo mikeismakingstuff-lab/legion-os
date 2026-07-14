@@ -1,46 +1,28 @@
-# Specification: Legion OS — Pipeline Architecture Evaluation (LangGraph vs. Pure Python)
+# Specification: Deterministic Deliberation Stage
 
 ## Objective
-Evaluate the architectural trade-offs between two approaches for the Legion OS pipeline execution framework and implement the recommended solution.
+Refactor the Stage 5 Deliberation stage (`src/stage5_deliberate.py`) to remove all external LLM dependencies (Gemini and Qwen) and replace them with a pure deterministic selection and ranking mechanism. The stage will select the top 3 units by aggregate score, compute flags via threshold checks, and emit a structured output containing `rationale_facts` (with rank, unit_id, top_lens, top_lens_score, and aggregate_score) instead of a natural language rationale string.
 
-### Approach A: LangGraph Framework
-- Uses `langgraph.graph.StateGraph` to compile and execute the pipeline.
-- Requires external dependencies: `langgraph`, `pydantic`, `anyio`, etc.
-- Uses conditional edges for routing (e.g., error handling, shishi-odoshi hold, retraction circuit breaker).
+## Requirements
+1. Remove the `google.genai` import and all Gemini/Qwen API calls, helper functions, and mock functions entirely.
+2. Retrieve the top scored units from Stage 4.
+3. Select the top 3 units by `aggregate_score` descending.
+4. For each selected unit, determine the highest-scoring lens name (`top_lens`) and its score (`top_lens_score`) from the lens scores.
+5. Construct a `rationale_facts` dictionary for each unit containing:
+   - `rank`: string ("1", "2", "3")
+   - `slot`: string ("1A", "2A", "3A")
+   - `unit_id`: string
+   - `top_lens`: string
+   - `top_lens_score`: float
+   - `aggregate_score`: float
+6. Compute warning flags based on the following deterministic threshold checks (assumptions for review):
+   - If the highest aggregate score is below 0.6, add a flag: `{"type": "low_confidence", "detail": "Top unit aggregate score is below 0.6"}`.
+   - If the difference between the 1st and 3rd ranked unit's aggregate score is less than 0.05, add a flag: `{"type": "narrow_margin", "detail": "Score difference between 1st and 3rd unit is below 0.05"}`.
+7. Persist the deliberation results to the `deliberation_results` table with the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
+8. Update the validation helper `_validate_qwen_output` (renamed to `_validate_deliberation_output`) to validate the new `rationale_facts` structure instead of `rationale`.
+9. Update `tests/test_stage5.py` to test the new deterministic logic directly and remove all Gemini/mock-Gemini test paths.
 
-### Approach B: Pure Python StateMachine (Zero-Dependency)
-- Uses a custom, lightweight Python class (`LegionStateMachine`) to manage node execution and routing.
-- Zero external dependencies (standard library only).
-- Uses explicit `if/elif` branching and loops for routing.
-
----
-
-## Evaluation Criteria & Findings
-
-1. **Component Weight & Profile Impact:**
-   - Approach A requires ~120MB of dependencies and adds ~700ms cold-start overhead due to Pydantic schema compilation.
-   - Approach B has 0MB footprint and <5ms import time.
-   - *Context:* The local hardware is an Intel Iris Xe CPU-only system. Shared VRAM means memory overhead directly competes with local LLM inference weights.
-
-2. **Looping & Timeout Resilience (Shishi-Odoshi):**
-   - Approach A requires external orchestration or a state persistence layer (`SqliteSaver`) to handle the pending retry loop gracefully without infinite loops.
-   - Approach B can implement a native `while` loop with a sleep interval and loop counter in a few lines of code.
-
-3. **Fault Isolation & Adjudication (Retraction Circuit Breaker):**
-   - Approach A handles exceptions at the node boundary, converting them to state flags for conditional routing.
-   - Approach B handles exceptions explicitly in the dispatcher loop, providing a clean Python traceback and easier debugging.
-
-4. **Data Re-Read Hygiene (DB-as-Contract):**
-   - The pipeline uses a strict "Database-as-Contract" pattern where stages read/write from SQLite by `mission_id`.
-   - The State passport only carries tracking strings/booleans, making LangGraph's rich state-merging features redundant.
-
----
-
-## Committee Task
-1. Analyze these findings. Provide a brief, objective critique of both approaches.
-2. Implement the final recommended architecture (either a clean `LegionStateMachine` class or the compiled `StateGraph` setup) as a production-grade Python module.
-3. If implementing the Pure Python `LegionStateMachine`, ensure it:
-   - Accepts a `PipelineState` dict.
-   - Wraps each stage node in exception handling.
-   - Implements the loop back from `arbitration` to `weigh` with a retry limit (max 3 retries) to prevent infinite loops.
-   - Implements the shishi-odoshi pending hold gracefully.
+## Hard Constraints
+1. Do not use any external network calls or language model APIs.
+2. The output schema must strictly match the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
+3. Do not modify any other pipeline stages.

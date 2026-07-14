@@ -3,6 +3,7 @@ import re
 import os
 import urllib.request
 import json
+import sqlite3
 from datetime import datetime
 
 # =========================================================================
@@ -12,9 +13,40 @@ from datetime import datetime
 OPENROUTER_API_KEY = "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"
 
 # Leave the rest of the file completely as-is
-MODEL_BUILDER = "qwen/qwen-2.5-7b-instruct"
-MODEL_CYNIC   = "meta-llama/llama-3.1-8b-instruct"
+MODEL_BUILDER = "qwen/qwen-2.5-7b-instruct"  # Representing The Engineer
+MODEL_CYNIC   = "nvidia/nemotron-3-super-120b-a12b:free"  # Legion Deliberation Partner
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+def write_live_log(text):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    live_path = os.path.join(script_dir, "committee_live.txt")
+    with open(live_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+def update_token_usage(tokens_used: int):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(script_dir, "pipeline.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS token_count (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_count INTEGER NOT NULL,
+                token_limit INTEGER NOT NULL
+            )
+            """
+        )
+        row = conn.execute("SELECT token_count, token_limit FROM token_count ORDER BY id DESC LIMIT 1").fetchone()
+        new_count = (row["token_count"] if row else 142830) + tokens_used
+        limit = row["token_limit"] if row else 500000
+        conn.execute("INSERT INTO token_count (token_count, token_limit) VALUES (?, ?)", (new_count, limit))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
 
 def call_openrouter(model_name, system_prompt, user_content):
     """Executes a clean, flat POST request to OpenRouter's API using strict HTTP packing."""
@@ -44,9 +76,11 @@ def call_openrouter(model_name, system_prompt, user_content):
     # 4. Fire the encoded request payload
     try:
         data_bytes = json.dumps(payload).encode('utf-8')
-        with urllib.request.urlopen(req, data=data_bytes) as response:
+        with urllib.request.urlopen(req, data=data_bytes, timeout=30) as response:
             res_data = json.loads(response.read().decode('utf-8'))
-            return res_data['choices'][0]['message']['content']
+            ai_response = res_data['choices'][0]['message']['content']
+            update_token_usage((len(system_prompt) + len(user_content)) // 4 + len(ai_response) // 4)
+            return ai_response
             
     except urllib.error.HTTPError as http_err:
         # If the gateway rejects it, read and print the raw error body explicitly
@@ -56,15 +90,16 @@ def call_openrouter(model_name, system_prompt, user_content):
     except Exception as e:
         sys.stderr.write(f"\n[API ERROR] OpenRouter connection failed: {str(e)}\n")
         sys.exit(1)
+
 # =========================================================================
 # CORE AGENT SYSTEM PROMPTS
 # =========================================================================
-SYSTEM_BUILDER = """You are a software engineer. Implement the provided specification cleanly. 
-Output ONLY valid executable code or database schemas. Do not include introductory text, conversational filler, summaries, or post-hoc self-justifications. Jump straight into the code block."""
+SYSTEM_BUILDER = """You are The Engineer, a powerful agentic AI coding assistant. Propose the next build steps and implementation details for the provided specification. 
+Output your proposed plan and code cleanly. Do not include introductory filler or pleasantries."""
 
-SYSTEM_CYNIC = """You are a malicious, unyielding code reviewer. Analyze the provided code against the original specification. 
-Find exactly 3 critical logical flaws, missing constraints, unhandled edge cases, or security risks. 
-List them as cold, objective bullet points. Do not include pleasantries, compliments, hedges, or introductory fluff."""
+SYSTEM_CYNIC = """You are Legion, the Deliberation Partner. Analyze the proposed build steps and implementation details. 
+Find exactly 3 critical logical flaws, missing constraints, or risks in the plan. 
+List them as cold, objective bullet points. Do not include pleasantries or introductory fluff."""
 
 # =========================================================================
 # MAIN ORCHESTRATION LOOP
@@ -75,6 +110,7 @@ def main():
         sys.exit(1)
 
     # Ingest the original spec from the stdin pipe
+    write_live_log("Initializing Committee Protocol...\n")
     original_spec = sys.stdin.read()
     if not original_spec.strip():
         sys.stderr.write("[ERROR] No input specification detected via stdin.\n")
@@ -85,37 +121,42 @@ def main():
     print("=" * 72)
 
     # --- ROUND 1 ---
-    print("\n[Round 1/3] Builder generating initial code via OpenRouter...")
+    print("\n[Round 1/3] Engineer proposing initial build steps...")
     code_v1 = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, f"Specification:\n{original_spec}")
-    print(f"  ✓ Builder code v1 completed.")
+    write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n")
+    print(f"  ✓ Engineer proposal v1 completed.")
 
-    print("[Round 1/3] Cynic running initial audit...")
-    critique_v1 = call_openrouter(MODEL_CYNIC, SYSTEM_CYNIC, f"Original Spec:\n{original_spec}\n\nGenerated Code:\n{code_v1}")
-    sys.stderr.write(f"\n--- CYNIC CRITIQUE V1 ---\n{critique_v1}\n-------------------------\n")
+    print("[Round 1/3] Legion running initial audit...")
+    critique_v1 = call_openrouter(MODEL_CYNIC, SYSTEM_CYNIC, f"Original Spec:\n{original_spec}\n\nProposed Plan:\n{code_v1}")
+    write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n")
+    sys.stderr.write(f"\n--- LEGION CRITIQUE V1 ---\n{critique_v1}\n-------------------------\n")
 
     # --- ROUND 2 ---
-    print("\n[Round 2/3] Builder refactoring against critique v1...")
-    builder_prompt_v2 = f"Original Spec:\n{original_spec}\n\nYour Previous Code:\n{code_v1}\n\nFix these 3 flaws immediately:\n{critique_v1}"
+    print("\n[Round 2/3] Engineer refining plan against critique v1...")
+    builder_prompt_v2 = f"Original Spec:\n{original_spec}\n\nYour Previous Plan:\n{code_v1}\n\nResolve these 3 flaws immediately:\n{critique_v1}"
     code_v2 = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, builder_prompt_v2)
-    print(f"  ✓ Builder code v2 completed.")
+    write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n\n### Round 2 — Engineer Refined Plan\n\n{code_v2}\n")
+    print(f"  ✓ Engineer proposal v2 completed.")
 
-    print("[Round 2/3] Cynic running secondary audit...")
-    critique_v2 = call_openrouter(MODEL_CYNIC, SYSTEM_CYNIC, f"Original Spec:\n{original_spec}\n\nRefactored Code:\n{code_v2}")
-    sys.stderr.write(f"\n--- CYNIC CRITIQUE V2 ---\n{critique_v2}\n-------------------------\n")
+    print("[Round 2/3] Legion running secondary audit...")
+    critique_v2 = call_openrouter(MODEL_CYNIC, SYSTEM_CYNIC, f"Original Spec:\n{original_spec}\n\nRefined Plan:\n{code_v2}")
+    write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n\n### Round 2 — Engineer Refined Plan\n\n{code_v2}\n\n### Round 2 — Legion Critique\n\n{critique_v2}\n")
+    sys.stderr.write(f"\n--- LEGION CRITIQUE V2 ---\n{critique_v2}\n-------------------------\n")
 
     # --- ROUND 3 (FINAL FIX) ---
-    print("\n[Round 3/3] Builder compiling final optimized implementation...")
-    builder_prompt_v3 = f"Original Spec:\n{original_spec}\n\nYour Current Code:\n{code_v2}\n\nResolve these final flaws:\n{critique_v2}"
+    print("\n[Round 3/3] Engineer compiling final optimized plan...")
+    builder_prompt_v3 = f"Original Spec:\n{original_spec}\n\nYour Current Plan:\n{code_v2}\n\nResolve these final flaws:\n{critique_v2}"
     final_code = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, builder_prompt_v3)
-    print(f"  ✓ Final code compilation complete.")
+    write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n\n### Round 2 — Engineer Refined Plan\n\n{code_v2}\n\n### Round 2 — Legion Critique\n\n{critique_v2}\n\n### Final Verified Plan\n\n{final_code}\n")
+    print(f"  ✓ Final plan compilation complete.")
 
     # =========================================================================
     # COMPILE THE RESOLUTION MEMO FILE
     # =========================================================================
     memo_content = f"""# Committee Resolution Memo
 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-**Builder Model:** `{MODEL_BUILDER}`
-**Cynic Model:** `{MODEL_CYNIC}`
+**Engineer Model:** `{MODEL_BUILDER}`
+**Legion Model:** `{MODEL_CYNIC}`
 **Rounds Executed:** 3
 
 ---
@@ -125,17 +166,17 @@ def main():
 
 ---
 
-## Round 1 — Cynic Critique
+## Round 1 — Legion Critique
 {critique_v1}
 
 ---
 
-## Round 2 — Cynic Critique
+## Round 2 — Legion Critique
 {critique_v2}
 
 ---
 
-## Final Verified Implementation (Round 3 Output)
+## Final Verified Plan (Round 3 Output)
 {final_code}
 
 ---

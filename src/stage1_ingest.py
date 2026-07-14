@@ -146,6 +146,10 @@ def ingest_record(
              raw_content, timestamp, status),
         )
 
+        # Compress the raw content and store it in compressed_content table
+        from src.compression_engine import compression_engine
+        compression_engine.compress_record(ingest_id, raw_content, db_path)
+
         record = {
             "ingest_id": ingest_id,
             "mission_id": mission_id,

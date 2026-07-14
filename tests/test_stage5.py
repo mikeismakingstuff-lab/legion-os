@@ -2,22 +2,31 @@
 Committee OS — Stage 5 Deliberate tests.
 
 Covers:
-  1. Gemini Reactive Formatter (mock formatting and fallback behavior)
-  2. Qwen Deliberation Engine (mock deliberation, validation, retry on malformed output)
-  3. Qwen output contract validation (slots, confidence, IDs)
-  4. Pipeline halt behavior (on validation failure or complete failure)
-  5. 429 rate limit exponential backoff (mocking RateLimitError)
-  6. Pipeline logging (ai_call, ai_error, pipeline_halt)
-  7. End-to-end deliberation: ingest → parse → filter → weigh → deliberate → verify deliberation_results table
+  1. Deterministic Deliberation Engine (ranking, rationale_facts, flags)
+  2. Output contract validation (slots, confidence, IDs, rationale_facts keys)
+  3. Pipeline halt behavior (on validation failure or complete failure)
+  4. End-to-end deliberation: ingest → parse → filter → weigh → deliberate → verify deliberation_results table
 """
+
+import sys
+from unittest.mock import MagicMock
+
+# Mock headroom module before importing anything that imports it
+class MockHeadroomCompressor:
+    def compress(self, text):
+        return text
+    def decompress(self, text):
+        return text
+
+mock_headroom = MagicMock()
+mock_headroom.HeadroomCompressor = MockHeadroomCompressor
+sys.modules['headroom'] = mock_headroom
 
 import json
 import sqlite3
-import time
 from pathlib import Path
 
 import pytest
-from openai import RateLimitError
 
 from src.init_db import init_database
 from src.stage0_mission import create_mission
@@ -26,8 +35,7 @@ from src.stage2_parse import parse_ingest_record
 from src.stage3_filter import filter_units
 from src.stage4_weigh import weigh_units
 from src.stage5_deliberate import (
-    _call_gemini,
-    _validate_qwen_output,
+    _validate_deliberation_output,
     deliberate_mission,
 )
 
@@ -72,73 +80,116 @@ def _setup_mission_with_scored_units(tmp_db, raw_content, domain="content_syndic
 
 
 # ═══════════════════════════════════════════════════════════════
-# 1. Gemini Formatter
+# 1. Deterministic Deliberation & Validation
 # ═══════════════════════════════════════════════════════════════
 
-class TestGeminiFormatter:
-    def test_gemini_mock_formatting(self):
-        payload = {
-            "mission_id": "test-uuid",
-            "mission_statement": "Test statement",
-            "top_units": [
-                {"unit_id": "u1", "content": "hello", "lens_scores": {}, "aggregate_score": 0.8}
-            ],
-        }
-        res = _call_gemini(payload)
-        assert res["mission_id"] == "test-uuid"
-        assert len(res["top_units"]) == 1
-        assert res["top_units"][0]["unit_id"] == "u1"
-        assert "gemini_error" not in res
-
-
-# ═══════════════════════════════════════════════════════════════
-# 2. Qwen Output Contract Validation
-# ═══════════════════════════════════════════════════════════════
-
-class TestQwenValidation:
-    def test_valid_output(self):
-        handoff = {
-            "mission_id": "test-uuid",
-            "top_units": [
-                {"unit_id": "u1"},
-                {"unit_id": "u2"},
-                {"unit_id": "u3"},
-            ]
-        }
+class TestDeterministicDeliberation:
+    def test_valid_output_validation(self):
+        top_unit_ids = {"u1", "u2", "u3"}
         output = {
             "mission_id": "test-uuid",
             "deliberation_id": "delib-uuid",
             "recommendations": [
-                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
-                {"rank": 2, "slot": "2A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
-                {"rank": 3, "slot": "3A", "unit_id": "u3", "rationale": "fine", "confidence": 0.7},
+                {
+                    "rank": "1",
+                    "slot": "1A",
+                    "unit_id": "u1",
+                    "rationale_facts": {
+                        "rank": "1",
+                        "unit_id": "u1",
+                        "top_lens": "creative_director",
+                        "top_lens_score": 0.8,
+                        "aggregate_score": 0.85,
+                    },
+                    "confidence": 0.85,
+                },
+                {
+                    "rank": "2",
+                    "slot": "2A",
+                    "unit_id": "u2",
+                    "rationale_facts": {
+                        "rank": "2",
+                        "unit_id": "u2",
+                        "top_lens": "financial_director",
+                        "top_lens_score": 0.7,
+                        "aggregate_score": 0.75,
+                    },
+                    "confidence": 0.75,
+                },
+                {
+                    "rank": "3",
+                    "slot": "3A",
+                    "unit_id": "u3",
+                    "rationale_facts": {
+                        "rank": "3",
+                        "unit_id": "u3",
+                        "top_lens": "technical_director",
+                        "top_lens_score": 0.6,
+                        "aggregate_score": 0.65,
+                    },
+                    "confidence": 0.65,
+                },
             ],
             "flags": []
         }
-        err = _validate_qwen_output(output, handoff)
+        err = _validate_deliberation_output(output, top_unit_ids)
         assert err is None
 
     def test_invalid_slots(self):
-        handoff = {
-            "mission_id": "test-uuid",
-            "top_units": [{"unit_id": "u1"}, {"unit_id": "u2"}, {"unit_id": "u3"}]
-        }
+        top_unit_ids = {"u1", "u2", "u3"}
         # Duplicate slot 1A
         output = {
             "mission_id": "test-uuid",
             "deliberation_id": "delib-uuid",
             "recommendations": [
-                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
-                {"rank": 2, "slot": "1A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
-                {"rank": 3, "slot": "3A", "unit_id": "u3", "rationale": "fine", "confidence": 0.7},
-            ]
+                {
+                    "rank": "1",
+                    "slot": "1A",
+                    "unit_id": "u1",
+                    "rationale_facts": {
+                        "rank": "1",
+                        "unit_id": "u1",
+                        "top_lens": "creative_director",
+                        "top_lens_score": 0.8,
+                        "aggregate_score": 0.85,
+                    },
+                    "confidence": 0.85,
+                },
+                {
+                    "rank": "2",
+                    "slot": "1A",
+                    "unit_id": "u2",
+                    "rationale_facts": {
+                        "rank": "2",
+                        "unit_id": "u2",
+                        "top_lens": "financial_director",
+                        "top_lens_score": 0.7,
+                        "aggregate_score": 0.75,
+                    },
+                    "confidence": 0.75,
+                },
+                {
+                    "rank": "3",
+                    "slot": "3A",
+                    "unit_id": "u3",
+                    "rationale_facts": {
+                        "rank": "3",
+                        "unit_id": "u3",
+                        "top_lens": "technical_director",
+                        "top_lens_score": 0.6,
+                        "aggregate_score": 0.65,
+                    },
+                    "confidence": 0.65,
+                },
+            ],
+            "flags": []
         }
-        err = _validate_qwen_output(output, handoff)
+        err = _validate_deliberation_output(output, top_unit_ids)
         assert "Duplicate slot" in err
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3. Pipeline Halt Behavior
+# 2. Pipeline Halt Behavior
 # ═══════════════════════════════════════════════════════════════
 
 class TestPipelineHalt:
@@ -164,7 +215,7 @@ class TestPipelineHalt:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4. End-to-End Deliberation
+# 3. End-to-End Deliberation
 # ═══════════════════════════════════════════════════════════════
 
 class TestEndToEndDeliberation:
@@ -195,3 +246,5 @@ class TestEndToEndDeliberation:
         recs = json.loads(row["recommendations"])
         assert len(recs) == 3
         assert recs[0]["slot"] == "1A"
+        assert "rationale_facts" in recs[0]
+        assert "top_lens" in recs[0]["rationale_facts"]

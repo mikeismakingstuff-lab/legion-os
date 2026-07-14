@@ -1,0 +1,46 @@
+﻿On branch master
+Your branch is up to date with 'origin/master'.
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   RadioStation_ShishiOdoshi.xlsx
+	modified:   _committee_spec.md
+	modified:   clean_music.py
+	modified:   committee.py
+	modified:   committee_memo.md
+	modified:   public/index.html
+	modified:   public/scripts.js
+	modified:   public/styles.css
+	modified:   src/compression_engine.py
+	modified:   src/stage1_ingest.py
+	modified:   src/stage5_deliberate.py
+	modified:   src/stage6_output.py
+	modified:   src/web_server.py
+	deleted:    test music library.xlsx
+	modified:   test_out.txt
+	modified:   tests/test_stage5.py
+	modified:   tests/test_stage6.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	README.md
+	committee_live.txt
+	diff.txt
+	diff_output.txt
+	dry_run_out.txt
+	original_stage6.txt
+	original_test_stage6.txt
+	rename_music.py
+	rename_transaction_20260707_060240.json
+	src/server.js
+	status.txt
+	temp_error_body_utf8.txt
+	temp_qwen_test.txt
+	test_error.py
+	test_output.txt
+	tests/test_rename_music.py
+	traceback.txt
+	workspace_diff.txt
+
+no changes added to commit (use "git add" and/or "git commit -a")

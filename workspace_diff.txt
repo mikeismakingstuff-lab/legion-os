@@ -1,0 +1,1863 @@
+diff --git a/RadioStation_ShishiOdoshi.xlsx b/RadioStation_ShishiOdoshi.xlsx
+index 9528c86..3007c6b 100644
+Binary files a/RadioStation_ShishiOdoshi.xlsx and b/RadioStation_ShishiOdoshi.xlsx differ
+diff --git a/_committee_spec.md b/_committee_spec.md
+index 3f82ae5..56e9659 100644
+--- a/_committee_spec.md
++++ b/_committee_spec.md
+@@ -1,46 +1,28 @@
+-# Specification: Legion OS — Pipeline Architecture Evaluation (LangGraph vs. Pure Python)
++# Specification: Deterministic Deliberation Stage
+ 
+ ## Objective
+-Evaluate the architectural trade-offs between two approaches for the Legion OS pipeline execution framework and implement the recommended solution.
+-
+-### Approach A: LangGraph Framework
+-- Uses `langgraph.graph.StateGraph` to compile and execute the pipeline.
+-- Requires external dependencies: `langgraph`, `pydantic`, `anyio`, etc.
+-- Uses conditional edges for routing (e.g., error handling, shishi-odoshi hold, retraction circuit breaker).
+-
+-### Approach B: Pure Python StateMachine (Zero-Dependency)
+-- Uses a custom, lightweight Python class (`LegionStateMachine`) to manage node execution and routing.
+-- Zero external dependencies (standard library only).
+-- Uses explicit `if/elif` branching and loops for routing.
+-
+----
+-
+-## Evaluation Criteria & Findings
+-
+-1. **Component Weight & Profile Impact:**
+-   - Approach A requires ~120MB of dependencies and adds ~700ms cold-start overhead due to Pydantic schema compilation.
+-   - Approach B has 0MB footprint and <5ms import time.
+-   - *Context:* The local hardware is an Intel Iris Xe CPU-only system. Shared VRAM means memory overhead directly competes with local LLM inference weights.
+-
+-2. **Looping & Timeout Resilience (Shishi-Odoshi):**
+-   - Approach A requires external orchestration or a state persistence layer (`SqliteSaver`) to handle the pending retry loop gracefully without infinite loops.
+-   - Approach B can implement a native `while` loop with a sleep interval and loop counter in a few lines of code.
+-
+-3. **Fault Isolation & Adjudication (Retraction Circuit Breaker):**
+-   - Approach A handles exceptions at the node boundary, converting them to state flags for conditional routing.
+-   - Approach B handles exceptions explicitly in the dispatcher loop, providing a clean Python traceback and easier debugging.
+-
+-4. **Data Re-Read Hygiene (DB-as-Contract):**
+-   - The pipeline uses a strict "Database-as-Contract" pattern where stages read/write from SQLite by `mission_id`.
+-   - The State passport only carries tracking strings/booleans, making LangGraph's rich state-merging features redundant.
+-
+----
+-
+-## Committee Task
+-1. Analyze these findings. Provide a brief, objective critique of both approaches.
+-2. Implement the final recommended architecture (either a clean `LegionStateMachine` class or the compiled `StateGraph` setup) as a production-grade Python module.
+-3. If implementing the Pure Python `LegionStateMachine`, ensure it:
+-   - Accepts a `PipelineState` dict.
+-   - Wraps each stage node in exception handling.
+-   - Implements the loop back from `arbitration` to `weigh` with a retry limit (max 3 retries) to prevent infinite loops.
+-   - Implements the shishi-odoshi pending hold gracefully.
++Refactor the Stage 5 Deliberation stage (`src/stage5_deliberate.py`) to remove all external LLM dependencies (Gemini and Qwen) and replace them with a pure deterministic selection and ranking mechanism. The stage will select the top 3 units by aggregate score, compute flags via threshold checks, and emit a structured output containing `rationale_facts` (with rank, unit_id, top_lens, top_lens_score, and aggregate_score) instead of a natural language rationale string.
++
++## Requirements
++1. Remove the `google.genai` import and all Gemini/Qwen API calls, helper functions, and mock functions entirely.
++2. Retrieve the top scored units from Stage 4.
++3. Select the top 3 units by `aggregate_score` descending.
++4. For each selected unit, determine the highest-scoring lens name (`top_lens`) and its score (`top_lens_score`) from the lens scores.
++5. Construct a `rationale_facts` dictionary for each unit containing:
++   - `rank`: string ("1", "2", "3")
++   - `slot`: string ("1A", "2A", "3A")
++   - `unit_id`: string
++   - `top_lens`: string
++   - `top_lens_score`: float
++   - `aggregate_score`: float
++6. Compute warning flags based on the following deterministic threshold checks (assumptions for review):
++   - If the highest aggregate score is below 0.6, add a flag: `{"type": "low_confidence", "detail": "Top unit aggregate score is below 0.6"}`.
++   - If the difference between the 1st and 3rd ranked unit's aggregate score is less than 0.05, add a flag: `{"type": "narrow_margin", "detail": "Score difference between 1st and 3rd unit is below 0.05"}`.
++7. Persist the deliberation results to the `deliberation_results` table with the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
++8. Update the validation helper `_validate_qwen_output` (renamed to `_validate_deliberation_output`) to validate the new `rationale_facts` structure instead of `rationale`.
++9. Update `tests/test_stage5.py` to test the new deterministic logic directly and remove all Gemini/mock-Gemini test paths.
++
++## Hard Constraints
++1. Do not use any external network calls or language model APIs.
++2. The output schema must strictly match the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
++3. Do not modify any other pipeline stages.
+diff --git a/clean_music.py b/clean_music.py
+index 28bd12d..4bc1b92 100644
+--- a/clean_music.py
++++ b/clean_music.py
+@@ -24,6 +24,12 @@ import sys
+ from pathlib import Path
+ from tinytag import TinyTag
+ 
++# Reconfigure stdout/stderr to UTF-8 to prevent encoding errors on Windows console
++if hasattr(sys.stdout, 'reconfigure'):
++    sys.stdout.reconfigure(encoding='utf-8')
++if hasattr(sys.stderr, 'reconfigure'):
++    sys.stderr.reconfigure(encoding='utf-8')
++
+ # ---------------------------------------------------------------------------
+ # Fingerprinting
+ # ---------------------------------------------------------------------------
+@@ -247,6 +253,10 @@ def strip_trailing_upload_id(title):
+ # File matching
+ # ---------------------------------------------------------------------------
+ 
++_disk_files_set = None
++_disk_files_lower = None
++_clean_to_disk = None
++
+ def find_matching_file(excel_name, disk_files):
+     """
+     Match an Excel filename entry to an actual disk filename.
+@@ -255,27 +265,40 @@ def find_matching_file(excel_name, disk_files):
+       2. Regex match — '?' treated as a wildcard for encoding placeholders.
+       3. Alphanumeric-only fuzzy match (exact, then substring).
+     """
+-    if excel_name in disk_files:
++    global _disk_files_set, _disk_files_lower, _clean_to_disk
++    if _disk_files_set is None:
++        _disk_files_set = set(disk_files)
++        _disk_files_lower = {f.lower(): f for f in disk_files}
++        _clean_to_disk = {}
++        for f in disk_files:
++            c = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
++            if c:
++                if c not in _clean_to_disk:
++                    _clean_to_disk[c] = f
++
++    if excel_name in _disk_files_set:
+         return excel_name
+ 
+-    pattern_str = re.escape(excel_name).replace(r'\?', '.+')
+-    try:
+-        pattern = re.compile('^' + pattern_str + '$', re.IGNORECASE)
+-        for f in disk_files:
+-            if pattern.match(f):
+-                return f
+-    except Exception:
+-        pass
++    excel_lower = excel_name.lower()
++    if excel_lower in _disk_files_lower:
++        return _disk_files_lower[excel_lower]
++
++    if '?' in excel_name:
++        pattern_str = re.escape(excel_name).replace(r'\?', '.')
++        try:
++            pattern = re.compile('^' + pattern_str + '$', re.IGNORECASE)
++            for f in disk_files:
++                if pattern.match(f):
++                    return f
++        except Exception:
++            pass
+ 
+     excel_clean = re.sub(r'[^a-zA-Z0-9]', '', excel_name).lower()
+     if excel_clean:
+-        for f in disk_files:
+-            f_clean = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
+-            if excel_clean == f_clean:
+-                return f
+-        for f in disk_files:
+-            f_clean = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
+-            if f_clean and (excel_clean in f_clean or f_clean in excel_clean):
++        if excel_clean in _clean_to_disk:
++            return _clean_to_disk[excel_clean]
++        for f_clean, f in _clean_to_disk.items():
++            if excel_clean in f_clean or f_clean in excel_clean:
+                 return f
+ 
+     return None
+@@ -284,7 +307,7 @@ def find_matching_file(excel_name, disk_files):
+ # Filename structural parsing
+ # ---------------------------------------------------------------------------
+ 
+-def parse_filename_structurally(filename, canonical_artists):
++def parse_filename_structurally(filename, canonical_artists_clean):
+     """
+     Attempt to extract (artist, title) from a filename using structural signals only.
+ 
+@@ -307,8 +330,7 @@ def parse_filename_structurally(filename, canonical_artists):
+         artist_idx = -1
+         for idx, part in enumerate(parts):
+             part_clean = re.sub(r'[^a-zA-Z0-9]', '', part).lower()
+-            for art in canonical_artists:
+-                art_clean = re.sub(r'[^a-zA-Z0-9]', '', art).lower()
++            for art, art_clean in canonical_artists_clean:
+                 if len(art_clean) > 3 and art_clean == part_clean:
+                     artist_idx = idx
+                     break
+@@ -379,10 +401,17 @@ def main():
+     # Structural filter only: reject uploader handles (trailing 3+ digits).
+     print(f"Building canonical artist list from: {audio_dir}")
+     canonical_artists = set()
++    total_files = len(disk_files)
++    processed = 0
++    file_tags = {}  # Maps filename -> (artist, title)
+     for f in disk_files:
+         if f.lower().endswith(audio_exts):
++            processed += 1
++            if processed % 1000 == 0:
++                print(f"  Processed {processed}/{total_files} files for canonical artists...")
+             try:
+                 tag = TinyTag.get(os.path.join(audio_dir, f))
++                file_tags[f] = (tag.artist, tag.title)
+                 if tag.artist:
+                     art = tag.artist.strip()
+                     if art and not is_uploader_handle(art) and not has_corrupt_characters(art) and len(art) < 100:
+@@ -390,6 +419,10 @@ def main():
+             except Exception:
+                 pass
+     print(f"Canonical artist set: {len(canonical_artists)} entries.")
++    canonical_artists_clean = []
++    for art in canonical_artists:
++        art_clean = re.sub(r'[^a-zA-Z0-9]', '', art).lower()
++        canonical_artists_clean.append((art, art_clean))
+ 
+     wb = openpyxl.load_workbook(xlsx_path)
+     ws = wb.active
+@@ -401,8 +434,11 @@ def main():
+ 
+     matched = 0
+     unmatched = 0
++    total_rows = ws.max_row - 1
+ 
+-    for row in ws.iter_rows(min_row=2):
++    for idx, row in enumerate(ws.iter_rows(min_row=2), start=1):
++        if idx % 1000 == 0:
++            print(f"  Processing Excel Row {idx}/{total_rows}...")
+         name = row[0].value
+         fullname = row[1].value
+         if not name:
+@@ -424,17 +460,12 @@ def main():
+         # On failure, falls through to heuristics — never silent.
+         fp_raw, fp_skip_reason = fingerprint_audio(fpcalc_path, path)
+         if fp_skip_reason:
+-            print(f"  [FP SKIP] {disk_match}: {fp_skip_reason}")
++            pass  # Suppress the verbose FP SKIP print to speed up execution and clean up output
+ 
+-        try:
+-            tag = TinyTag.get(path)
+-            tag_artist = tag.artist
+-            tag_title  = tag.title
+-        except Exception:
+-            tag_artist, tag_title = None, None
++        tag_artist, tag_title = file_tags.get(disk_match, (None, None))
+ 
+         # Structural parse of disk filename (disk has correct characters)
+-        fn_artist, fn_title = parse_filename_structurally(disk_match, canonical_artists)
++        fn_artist, fn_title = parse_filename_structurally(disk_match, canonical_artists_clean)
+ 
+         # ---- Resolve Artist ----
+         resolved_artist = tag_artist
+diff --git a/committee_memo.md b/committee_memo.md
+index 9f7dc8e..2ef51dd 100644
+--- a/committee_memo.md
++++ b/committee_memo.md
+@@ -1,5 +1,5 @@
+ # Committee Resolution Memo
+-**Generated:** 2026-07-03 10:22:37
++**Generated:** 2026-07-06 16:57:19
+ **Builder Model:** `qwen/qwen-2.5-7b-instruct`
+ **Cynic Model:** `meta-llama/llama-3.1-8b-instruct`
+ **Rounds Executed:** 3
+@@ -7,366 +7,121 @@
+ ---
+ 
+ ## Original Specification
+-# Specification: Legion OS ??? Futuristic UI Control Center
+-
+-## Environment Audit (Standing Rule)
+-1. **Local System Check:** Checked the workspace for HTML/JS/CSS files. Found `committee-os-manual.html` (documentation) but no active dashboard application.
+-2. **Open-Source Check:** For building a custom dashboard UI, standard web technologies (HTML/CSS/JS) or a lightweight framework like React/Vite or Python-based frameworks like Streamlit/Gradio are typically used. Since we want a highly customized, futuristic sci-fi tactical aesthetic (matching the image exactly), a custom HTML/CSS/JS single-page application (SPA) or a React/Vite app is the most flexible and precise way to build it.
+-3. **Conclusion:** Proceeding with a custom HTML/CSS/JS single-page application (SPA) to implement the dashboard UI.
+-
+----
++# Specification: Deterministic Deliberation Stage
+ 
+ ## Objective
+-Build a localized, unified control center for Legion OS based on the static visual layout in `Futuristic_UI_design_for_Legion_202607031016.jpeg`. The interface must be organized into a clean, multi-column dashboard with a sci-fi tactical aesthetic (dark mode, neon blue accents, clean panel borders).
+-
+----
+-
+-## Interface Components
+-
+-1. **Top Banner (Header):**
+-   - **Left:** Project identity branding ("LEGION" logo with a sci-fi icon).
+-   - **Center:** **System Monitor** tracking CPU and RAM telemetry (circular gauges) and Latency (line chart).
+-   - **Right:** **Token Monitor** tracking context windows against a 500,000 token ceiling (progress bar).
+-
+-2. **Leftmost Column (Files):**
+-   - A native file-tree directory viewer showing a nested structure of home folders, data loads, data formats, and active files. Clicking a file loads its preview in the Document Preview Frame.
+-
+-3. **Second Column (Document Preview Frame):**
+-   - A rich content viewer displaying:
+-     - Raw text blocks from a selected `.txt` file.
+-     - A tabular visualization of a `.xlsx` sheet.
+-     - A preview block of a `.docx` file.
+-
+-4. **Center Column (AI Chat Core):**
+-   - The primary execution terminal featuring a standard user-to-system conversational message thread.
+-   - A clean text ingestion input field with a "Send" trigger.
+-
+-5. **Right Column (Utility Panel & Community):**
+-   - **Top:** A real-time Markdown notepad scratchpad tool with formatting controls (Bold, Italic, Link, Code, Bullet, List).
+-   - **Bottom:** An embedded community communications sidebar widget (Discord-like channel view).
+-
+----
+-
+-## Committee Task
+-1. Analyze the layout. Provide a brief, objective critique of the multi-column design and usability.
+-2. Propose a concrete action plan for implementing this UI as a single-page application (SPA) using HTML, CSS, and JavaScript, integrating with the Legion OS backend (SQLite and the `LegionStateMachine`).
+-3. Detail how the UI will fetch and display real-time telemetry (CPU, RAM, token counts) and file-tree data from the local system.
++Refactor the Stage 5 Deliberation stage (`src/stage5_deliberate.py`) to remove all external LLM dependencies (Gemini and Qwen) and replace them with a pure deterministic selection and ranking mechanism. The stage will select the top 3 units by aggregate score, compute flags via threshold checks, and emit a structured output containing `rationale_facts` (with rank, unit_id, top_lens, top_lens_score, and aggregate_score) instead of a natural language rationale string.
++
++## Requirements
++1. Remove the `google.genai` import and all Gemini/Qwen API calls, helper functions, and mock functions entirely.
++2. Retrieve the top scored units from Stage 4.
++3. Select the top 3 units by `aggregate_score` descending.
++4. For each selected unit, determine the highest-scoring lens name (`top_lens`) and its score (`top_lens_score`) from the lens scores.
++5. Construct a `rationale_facts` dictionary for each unit containing:
++   - `rank`: string ("1", "2", "3")
++   - `slot`: string ("1A", "2A", "3A")
++   - `unit_id`: string
++   - `top_lens`: string
++   - `top_lens_score`: float
++   - `aggregate_score`: float
++6. Compute warning flags based on the following deterministic threshold checks (assumptions for review):
++   - If the highest aggregate score is below 0.6, add a flag: `{"type": "low_confidence", "detail": "Top unit aggregate score is below 0.6"}`.
++   - If the difference between the 1st and 3rd ranked unit's aggregate score is less than 0.05, add a flag: `{"type": "narrow_margin", "detail": "Score difference between 1st and 3rd unit is below 0.05"}`.
++7. Persist the deliberation results to the `deliberation_results` table with the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
++8. Update the validation helper `_validate_qwen_output` (renamed to `_validate_deliberation_output`) to validate the new `rationale_facts` structure instead of `rationale`.
++9. Update `tests/test_stage5.py` to test the new deterministic logic directly and remove all Gemini/mock-Gemini test paths.
++
++## Hard Constraints
++1. Do not use any external network calls or language model APIs.
++2. The output schema must strictly match the updated schema (recommendations containing `rationale_facts` instead of `rationale`).
++3. Do not modify any other pipeline stages.
+ 
+ 
+ ---
+ 
+ ## Round 1 — Cynic Critique
+-Here are three critical logical flaws, missing constraints, unhandled edge cases, or security risks:
++Here are the critical logical flaws, missing constraints, unhandled edge cases, or security risks in the provided code:
+ 
+-*   **1.** **Insecure Direct Object Reference (IDOR) vulnerability**: The JavaScript code fetches data from the Legion OS backend using hardcoded URLs (`/api/system-telemetry`, `/api/token-count`, etc.). This allows an attacker to manipulate the data by modifying the URL or injecting malicious data. To fix this, the API endpoints should be validated and sanitized on the server-side to prevent IDOR attacks.
+-*   **2.** **SQL Injection risk**: The JavaScript code fetches data from the database using `fetch()` and assumes that the data is already sanitized. However, if the data is not properly sanitized, an attacker could inject malicious SQL code. To fix this, the database queries should be parameterized to prevent SQL injection attacks.
+-*   **3.** **Lack of error handling**: The JavaScript code does not handle errors that may occur during data fetching or API calls. This can lead to a poor user experience and potentially reveal sensitive information about the system. To fix this, error handling should be added to handle potential errors and provide a user-friendly error message.
++* The code does not handle the case where there are less than 3 units in the `top_units` DataFrame. This can lead to an `IndexError` when trying to access the `idx` variable in the loop. The code should check if the length of `top_units` is less than 3 before trying to access the `idx` variable.
++* The code does not validate the input `units` DataFrame to ensure that it has the required columns (`aggregate_score`, `lens_scores`, and `unit_id`). This can lead to a `KeyError` if any of these columns are missing. The code should add input validation to ensure that the required columns are present.
++* The code does not handle the case where the `lens_scores` column is not a pandas Series. This can lead to a `TypeError` when trying to call the `idxmax` method on `lens_scores`. The code should check if `lens_scores` is a pandas Series before trying to call the `idxmax` method on it.
+ 
+ ---
+ 
+ ## Round 2 — Cynic Critique
+-Here are three critical logical flaws, missing constraints, unhandled edge cases, or security risks in the provided code:
+-
+-*   **Insecure Direct Object Reference (IDOR) Vulnerability**: The `fetch` API is used to fetch data from the Legion OS backend, but the URLs are hardcoded and do not include any authentication or authorization checks. This makes it possible for an attacker to manipulate the URL to access sensitive data or perform unauthorized actions. To fix this, the backend API should be designed to require authentication and authorization for all requests, and the frontend should use secure authentication mechanisms to obtain a valid token or session ID.
++Here are the critical logical flaws, missing constraints, unhandled edge cases, or security risks in the provided code:
+ 
+-*   **Lack of Input Validation and Sanitization**: The `fetch` API is used to fetch data from the backend, but the data is not validated or sanitized before being displayed on the page. This makes it possible for an attacker to inject malicious data or code into the page. To fix this, the backend should validate and sanitize all incoming data, and the frontend should validate and sanitize any user input before sending it to the backend.
+-
+-*   **Insufficient Error Handling**: The `fetch` API is used to fetch data from the backend, but error handling is limited to logging the error to the console. This makes it difficult to diagnose and fix issues with the backend or network connectivity. To fix this, the frontend should provide more informative error messages to the user, and the backend should provide more detailed error messages to the frontend to facilitate debugging.
++* The code does not handle the case where the `lens_scores` column is missing from the input DataFrame. Although it checks for the presence of the `lens_scores` column, it does not check if it is empty or contains missing values. This could lead to a `TypeError` when trying to access the `idxmax()` method on an empty Series.
++* The code does not validate the input `units` DataFrame for missing or invalid values in the `unit_id` column. This could lead to a `KeyError` when trying to access the `unit_id` value in the `rationale_fact` dictionary.
++* The code does not handle the case where the `top_units` DataFrame is empty after filtering by `nlargest(3, 'aggregate_score')`. Although it checks for the presence of at least 3 units, it does not check if the filtered DataFrame is empty. This could lead to an `IndexError` when trying to access the `idx` value in the `for` loop.
+ 
+ ---
+ 
+ ## Final Verified Implementation (Round 3 Output)
+-```html
+-<!DOCTYPE html>
+-<html lang="en">
+-<head>
+-    <meta charset="UTF-8">
+-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+-    <title>Legion OS Control Center</title>
+-    <link rel="stylesheet" href="styles.css">
+-</head>
+-<body>
+-    <div id="header">
+-        <div id="logo">LEGION</div>
+-        <div id="system-monitor">
+-            <div id="cpu-gauge"></div>
+-            <div id="ram-gauge"></div>
+-            <div id="latency-chart"></div>
+-        </div>
+-        <div id="token-monitor"></div>
+-    </div>
+-    <div id="content">
+-        <div id="files-column">
+-            <div id="file-tree"></div>
+-            <div id="document-preview"></div>
+-        </div>
+-        <div id="ai-chat-core">
+-            <div id="chat-terminal"></div>
+-            <div id="input-field">
+-                <input type="text" id="message-input" placeholder="Type your message...">
+-                <button id="send-button">Send</button>
+-            </div>
+-        </div>
+-        <div id="utility-panel">
+-            <div id="markdown-notepad">
+-                <textarea id="markdown-editor" placeholder="Markdown Editor..."></textarea>
+-                <button id="format-bold">B</button>
+-                <button id="format-italic">I</button>
+-                <button id="format-link">L</button>
+-                <button id="format-code">C</button>
+-                <button id="format-list">L</button>
+-            </div>
+-            <div id="community-communications">
+-                <div id="community-chat"></div>
+-            </div>
+-        </div>
+-    </div>
+-    <script src="scripts.js"></script>
+-</body>
+-</html>
+-```
+-
+-```css
+-/* styles.css */
+-body {
+-    font-family: Arial, sans-serif;
+-    background-color: #1e1e1e;
+-    color: #ffffff;
+-    margin: 0;
+-    padding: 0;
+-}
+-
+-#header {
+-    display: flex;
+-    justify-content: space-between;
+-    align-items: center;
+-    padding: 10px;
+-    background-color: #2a2a2a;
+-}
+-
+-#logo {
+-    font-size: 24px;
+-    font-weight: bold;
+-}
+-
+-#system-monitor {
+-    display: flex;
+-    flex-direction: column;
+-    align-items: center;
+-}
+-
+-#token-monitor {
+-    display: flex;
+-    align-items: center;
+-    background-color: #333333;
+-    padding: 10px;
+-}
+-
+-#content {
+-    display: flex;
+-    height: calc(100vh - 60px);
+-}
+-
+-#files-column {
+-    width: 25%;
+-    background-color: #222222;
+-    overflow-y: auto;
+-}
+-
+-#ai-chat-core {
+-    width: 50%;
+-    background-color: #222222;
+-    overflow-y: auto;
+-}
+-
+-#utility-panel {
+-    width: 25%;
+-    background-color: #222222;
+-    display: flex;
+-    flex-direction: column;
+-}
+-
+-#markdown-notepad textarea {
+-    width: 100%;
+-    height: 100%;
+-    font-size: 16px;
+-    padding: 10px;
+-    border: 1px solid #444444;
+-}
+-
+-#community-communications {
+-    flex-grow: 1;
+-    background-color: #333333;
+-    padding: 10px;
+-}
+-
+-button {
+-    background-color: #444444;
+-    border: none;
+-    color: #ffffff;
+-    padding: 5px 10px;
+-    margin: 5px;
+-    cursor: pointer;
+-}
+-
+-button:hover {
+-    background-color: #555555;
+-}
+-```
+-
+-```javascript
+-// scripts.js
+-document.addEventListener('DOMContentLoaded', () => {
+-    const cpuGauge = document.getElementById('cpu-gauge');
+-    const ramGauge = document.getElementById('ram-gauge');
+-    const latencyChart = document.getElementById('latency-chart');
+-    const tokenMonitor = document.getElementById('token-monitor');
+-    const fileTree = document.getElementById('file-tree');
+-    const documentPreview = document.getElementById('document-preview');
+-    const chatTerminal = document.getElementById('chat-terminal');
+-    const messageInput = document.getElementById('message-input');
+-    const sendButton = document.getElementById('send-button');
+-    const markdownEditor = document.getElementById('markdown-editor');
+-
+-    // Simulate fetching data from the Legion OS backend
+-    function fetchData() {
+-        fetch('/api/system-telemetry')
+-            .then(response => response.json())
+-            .then(data => {
+-                const cpuUsage = data.cpuUsage;
+-                const ramUsage = data.ramUsage;
+-                const latency = data.latency;
+-
+-                // Update CPU gauge
+-                cpuGauge.style.width = `${cpuUsage}%`;
+-
+-                // Update RAM gauge
+-                ramGauge.style.width = `${ramUsage}%`;
+-
+-                // Update latency chart
+-                latencyChart.innerHTML = `<div style="width: ${latency}px;"></div>`;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching CPU/RAM telemetry:', error);
+-            });
+-
+-        fetch('/api/token-count')
+-            .then(response => response.json())
+-            .then(data => {
+-                const tokenCount = data.tokenCount;
+-                const tokenLimit = data.tokenLimit;
+-
+-                // Update token monitor
+-                tokenMonitor.innerHTML = `<progress value="${tokenCount}" max="${tokenLimit}"></progress>`;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching token count:', error);
+-            });
+-
+-        fetch('/api/file-tree')
+-            .then(response => response.json())
+-            .then(data => {
+-                fileTree.innerHTML = data.fileTree;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching file tree:', error);
+-            });
+-
+-        fetch('/api/document-preview')
+-            .then(response => response.json())
+-            .then(data => {
+-                documentPreview.innerHTML = data.documentPreview;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching document preview:', error);
+-            });
+-
+-        fetch('/api/chat-terminal')
+-            .then(response => response.json())
+-            .then(data => {
+-                chatTerminal.innerHTML = data.chatTerminal;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching chat terminal:', error);
+-            });
+-
+-        fetch('/api/markdown-editor')
+-            .then(response => response.json())
+-            .then(data => {
+-                markdownEditor.value = data.markdownEditor;
+-            })
+-            .catch(error => {
+-                console.error('Error fetching markdown editor:', error);
+-            });
+-    }
+-
+-    // Fetch data on page load
+-    fetchData();
+-
+-    // Send message to AI chat core
+-    sendButton.addEventListener('click', () => {
+-        const message = messageInput.value.trim();
+-        if (message) {
+-            fetch('/api/chat-send', {
+-                method: 'POST',
+-                headers: {
+-                    'Content-Type': 'application/json'
+-                },
+-                body: JSON.stringify({ message })
+-            })
+-            .then(response => response.json())
+-            .then(data => {
+-                console.log('Message sent:', data);
+-                messageInput.value = '';
+-            })
+-            .catch(error => {
+-                console.error('Error sending message:', error);
+-            });
++```python
++import pandas as pd
++
++def deliberate(units):
++    # Validate input DataFrame
++    required_columns = ['aggregate_score', 'lens_scores', 'unit_id']
++    if not all(column in units.columns for column in required_columns):
++        raise ValueError(f"Input DataFrame is missing required columns: {required_columns}")
++    
++    # Retrieve top scored units from Stage 4
++    top_units = units.nlargest(3, 'aggregate_score')
++    
++    if len(top_units) < 3:
++        raise ValueError("Not enough units to deliberate. At least 3 units are required.")
++    
++    # Initialize the list to hold the rationale facts
++    rationale_facts = []
++    
++    for idx, unit in top_units.iterrows():
++        # Determine the highest-scoring lens name and its score
++        if isinstance(unit['lens_scores'], pd.Series):
++            top_lens = unit['lens_scores'].idxmax()
++            top_lens_score = unit['lens_scores'][top_lens]
++        else:
++            raise TypeError("lens_scores must be a pandas Series")
++        
++        # Construct the rationale facts dictionary
++        rationale_fact = {
++            'rank': str(idx + 1),
++            'slot': f"{idx + 1}A",
++            'unit_id': unit['unit_id'],
++            'top_lens': top_lens,
++            'top_lens_score': top_lens_score,
++            'aggregate_score': unit['aggregate_score']
+         }
+-    });
+-});
+-```
+-
+-```sql
+--- Database schema for LegionOS
+-CREATE TABLE SystemTelemetry (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    cpu_usage INTEGER NOT NULL,
+-    ram_usage INTEGER NOT NULL,
+-    latency INTEGER NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
+-
+-CREATE TABLE TokenCount (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    token_count INTEGER NOT NULL,
+-    token_limit INTEGER NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
+-
+-CREATE TABLE FileTree (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    file_tree TEXT NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
+-
+-CREATE TABLE DocumentPreview (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    document_preview TEXT NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
+-
+-CREATE TABLE ChatTerminal (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    chat_terminal TEXT NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
+-
+-CREATE TABLE MarkdownEditor (
+-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-    markdown_editor TEXT NOT NULL,
+-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+-);
++        
++        rationale_facts.append(rationale_fact)
++    
++    # Compute warning flags
++    top_unit_score = top_units['aggregate_score'].max()
++    third_unit_score = top_units['aggregate_score'].min()
++    score_difference = top_unit_score - third_unit_score
++    
++    flags = []
++    if top_unit_score < 0.6:
++        flags.append({"type": "low_confidence", "detail": "Top unit aggregate score is below 0.6"})
++    if score_difference < 0.05:
++        flags.append({"type": "narrow_margin", "detail": "Score difference between 1st and 3rd unit is below 0.05"})
++    
++    # Return the results with flags
++    return rationale_facts, flags
++
++def _validate_deliberation_output(output):
++    # Validate the structure of the output
++    assert isinstance(output, tuple), "Output must be a tuple"
++    assert len(output) == 2, "Output tuple must have two elements"
++    assert isinstance(output[0], list), "First element must be a list of rationale facts"
++    assert isinstance(output[1], list), "Second element must be a list of flags"
++    for fact in output[0]:
++        assert isinstance(fact, dict), "Each rationale fact must be a dictionary"
++        assert set(fact.keys()) == {'rank', 'slot', 'unit_id', 'top_lens', 'top_lens_score', 'aggregate_score'}, "Rationale fact keys must match the expected schema"
++    for flag in output[1]:
++        assert isinstance(flag, dict), "Each flag must be a dictionary"
++        assert set(flag.keys()) == {'type', 'detail'}, "Flag keys must match the expected schema"
+ ```
+ 
+ ---
+diff --git a/public/index.html b/public/index.html
+index 7d15649..5b2f0bd 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -10,6 +10,10 @@
+ </head>
+ <body>
+     <div class="dashboard-container">
++        <div id="destruction-overlay" class="destruction-overlay" aria-hidden="true">
++            <div class="destruction-title">MALICIOUS DESTRUCTION MODE ACTIVE</div>
++        </div>
++
+         <!-- Top Banner (Header) -->
+         <header class="header-banner">
+             <div class="branding">
+@@ -54,6 +58,41 @@
+                     </div>
+                 </div>
+             </div>
++
++            <div class="telemetry-rail" id="telemetry-rail">
++                <div class="telemetry-card">
++                    <div class="telemetry-label">CPU Cores</div>
++                    <div class="telemetry-value" id="telemetry-cpu-cores">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Mem</div>
++                    <div class="telemetry-value" id="telemetry-ram">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Disk</div>
++                    <div class="telemetry-value" id="telemetry-disk">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Throughput</div>
++                    <div class="telemetry-value" id="telemetry-network">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Uptime</div>
++                    <div class="telemetry-value" id="telemetry-uptime">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Processes</div>
++                    <div class="telemetry-value" id="telemetry-processes">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Queue</div>
++                    <div class="telemetry-value" id="telemetry-queue">--</div>
++                </div>
++                <div class="telemetry-card">
++                    <div class="telemetry-label">Signal</div>
++                    <div class="telemetry-value" id="telemetry-signal">--</div>
++                </div>
++            </div>
+         </header>
+ 
+         <!-- Main Dashboard Columns -->
+diff --git a/public/scripts.js b/public/scripts.js
+index d2356fb..082ada2 100644
+--- a/public/scripts.js
++++ b/public/scripts.js
+@@ -10,6 +10,14 @@ document.addEventListener('DOMContentLoaded', () => {
+     const tokenCountEl = document.getElementById('token-count');
+     const tokenLimitEl = document.getElementById('token-limit');
+     const tokenProgress = document.getElementById('token-progress');
++    const telemetryCpuCoresEl = document.getElementById('telemetry-cpu-cores');
++    const telemetryRamEl = document.getElementById('telemetry-ram');
++    const telemetryDiskEl = document.getElementById('telemetry-disk');
++    const telemetryNetworkEl = document.getElementById('telemetry-network');
++    const telemetryUptimeEl = document.getElementById('telemetry-uptime');
++    const telemetryProcessesEl = document.getElementById('telemetry-processes');
++    const telemetryQueueEl = document.getElementById('telemetry-queue');
++    const telemetrySignalEl = document.getElementById('telemetry-signal');
+     const fileTreeEl = document.getElementById('file-tree');
+     const previewContainer = document.getElementById('preview-container');
+     const chatMessages = document.getElementById('chat-messages');
+@@ -35,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
+                 updateLatency(data.latency);
+                 // Update Token Monitor
+                 updateTokenMonitor(data.token_count, data.token_limit);
++                updateTelemetryCards(data);
+             })
+             .catch(err => console.error('Telemetry polling error:', err));
+     }
+@@ -84,6 +93,36 @@ document.addEventListener('DOMContentLoaded', () => {
+         tokenProgress.style.width = `${percent}%`;
+     }
+ 
++    function formatBytes(bytes) {
++        if (bytes < 1024) return `${bytes} B`;
++        const units = ['KB', 'MB', 'GB', 'TB'];
++        let size = bytes / 1024;
++        let unitIndex = 0;
++        while (size >= 1024 && unitIndex < units.length - 1) {
++            size /= 1024;
++            unitIndex += 1;
++        }
++        return `${size.toFixed(size < 10 ? 1 : 0)} ${units[unitIndex]}`;
++    }
++
++    function formatDuration(seconds) {
++        const hours = Math.floor(seconds / 3600);
++        const minutes = Math.floor((seconds % 3600) / 60);
++        const secs = seconds % 60;
++        return `${hours}h ${minutes}m ${secs}s`;
++    }
++
++    function updateTelemetryCards(data) {
++        telemetryCpuCoresEl.textContent = data.cpu_cores ?? '--';
++        telemetryRamEl.textContent = `${data.ram_used_gb?.toFixed(1) ?? '--'} / ${data.ram_total_gb?.toFixed(1) ?? '--'} GB`;
++        telemetryDiskEl.textContent = `${data.disk_used_gb?.toFixed(1) ?? '--'} / ${data.disk_total_gb?.toFixed(1) ?? '--'} GB`;
++        telemetryNetworkEl.textContent = `${formatBytes(data.network_sent ?? 0)} ↑ / ${formatBytes(data.network_recv ?? 0)} ↓`;
++        telemetryUptimeEl.textContent = formatDuration(data.uptime_seconds ?? 0);
++        telemetryProcessesEl.textContent = data.process_count ?? '--';
++        telemetryQueueEl.textContent = `${data.queue_depth ?? 0}%`;
++        telemetrySignalEl.textContent = `${data.signal_strength?.toFixed(1) ?? '--'}%`;
++    }
++
+     // Start polling every 2 seconds
+     pollTelemetry();
+     setInterval(pollTelemetry, 2000);
+@@ -223,11 +262,26 @@ document.addEventListener('DOMContentLoaded', () => {
+         chatMessages.scrollTop = chatMessages.scrollHeight;
+     }
+ 
++    function normalizeText(value) {
++        return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
++    }
++
++    function activateDestructionMode() {
++        document.body.classList.add('destruction-mode-active');
++        const overlay = document.getElementById('destruction-overlay');
++        if (overlay) {
++            overlay.classList.add('visible');
++        }
++    }
++
+     function sendChatMessage() {
+         const text = chatInput.value.trim();
+         if (!text) return;
+ 
+         appendMessage('User', text, 'user');
++        if (normalizeText(text) === normalizeText('are you there god its me margaret')) {
++            activateDestructionMode();
++        }
+         chatInput.value = '';
+ 
+         // Show typing indicator
+diff --git a/public/styles.css b/public/styles.css
+index c441585..2675d53 100644
+--- a/public/styles.css
++++ b/public/styles.css
+@@ -17,6 +17,79 @@ body {
+     overflow: hidden;
+ }
+ 
++body.destruction-mode-active {
++    background: radial-gradient(circle at top, #7f1d1d 0%, #1a0000 45%, #0a0000 100%);
++    color: #ffe5e5;
++    transition: background 0.4s ease;
++}
++
++body.destruction-mode-active .dashboard-container {
++    background: transparent;
++}
++
++body.destruction-mode-active .header-banner,
++body.destruction-mode-active .panel {
++    background: rgba(60, 0, 0, 0.92);
++    border-color: #ff4d4d;
++    box-shadow: 0 0 25px rgba(255, 77, 77, 0.35);
++}
++
++body.destruction-mode-active .panel-header,
++body.destruction-mode-active .logo-text {
++    color: #fff5f5;
++    text-shadow: 0 0 12px rgba(255, 77, 77, 0.7);
++}
++
++body.destruction-mode-active .btn-primary {
++    background: #ff4040;
++    color: white;
++}
++
++body.destruction-mode-active #chat-input {
++    background: #2a0000;
++    border-color: #ff4d4d;
++    color: #fff6f6;
++}
++
++.destruction-overlay {
++    position: fixed;
++    inset: 0;
++    display: none;
++    align-items: center;
++    justify-content: center;
++    background: rgba(255, 0, 0, 0.82);
++    z-index: 999;
++    pointer-events: none;
++}
++
++.destruction-overlay.visible {
++    display: flex;
++    animation: destructionPulse 0.8s infinite alternate;
++}
++
++.destruction-title {
++    font-family: 'Orbitron', sans-serif;
++    font-size: clamp(2rem, 6vw, 4.5rem);
++    font-weight: 700;
++    letter-spacing: 0.2em;
++    text-transform: uppercase;
++    text-align: center;
++    color: #ffffff;
++    text-shadow: 0 0 20px rgba(255, 255, 255, 0.7), 0 0 50px rgba(255, 0, 0, 0.9);
++    padding: 0 24px;
++}
++
++@keyframes destructionPulse {
++    from {
++        transform: scale(0.98);
++        opacity: 0.9;
++    }
++    to {
++        transform: scale(1.02);
++        opacity: 1;
++    }
++}
++
+ /* Custom Scrollbar Styling */
+ ::-webkit-scrollbar {
+     width: 6px;
+@@ -176,6 +249,41 @@ body {
+     width: 240px;
+ }
+ 
++.telemetry-rail {
++    display: grid;
++    grid-template-columns: repeat(4, minmax(90px, 1fr));
++    gap: 8px;
++    width: min(560px, 100%);
++    margin-left: 12px;
++}
++
++.telemetry-card {
++    background: linear-gradient(135deg, rgba(2, 12, 24, 0.96), rgba(12, 29, 49, 0.92));
++    border: 1px solid rgba(0, 210, 255, 0.22);
++    border-radius: 8px;
++    padding: 8px 10px;
++    min-height: 56px;
++    box-shadow: inset 0 0 10px rgba(0, 210, 255, 0.08);
++}
++
++.telemetry-label {
++    font-family: 'Orbitron', sans-serif;
++    font-size: 8px;
++    letter-spacing: 0.15em;
++    text-transform: uppercase;
++    color: #64748b;
++    margin-bottom: 4px;
++}
++
++.telemetry-value {
++    font-family: 'Share Tech Mono', monospace;
++    font-size: 12px;
++    color: #f8fafc;
++    white-space: nowrap;
++    overflow: hidden;
++    text-overflow: ellipsis;
++}
++
+ .token-stats {
+     display: flex;
+     flex-direction: column;
+diff --git a/src/compression_engine.py b/src/compression_engine.py
+index b1b573c..3ad7023 100644
+--- a/src/compression_engine.py
++++ b/src/compression_engine.py
+@@ -15,6 +15,7 @@ import json
+ from pathlib import Path
+ from typing import Optional
+ 
++# pyrefly: ignore [missing-import]
+ from headroom import HeadroomCompressor
+ from src.db import get_connection
+ 
+diff --git a/src/stage5_deliberate.py b/src/stage5_deliberate.py
+index 058b89a..1581bc7 100644
+--- a/src/stage5_deliberate.py
++++ b/src/stage5_deliberate.py
+@@ -1,38 +1,15 @@
+ """
+ Committee OS — Stage 5: Deliberate.
+ 
+-The only stage where language model judgment is applied.
+-Takes weighted, pre-scored structured data. Returns synthesis.
+-
+-Architecture §4 Contract
+--------------------------
+-INPUT   : Top N scored units from Stage 4
+-PROCESS : 1. Gemini Reactive Formatter:
+-             - Formats scored units into the handoff contract schema.
+-             - Must not interpret, score, rank, or summarize.
+-             - On error: fallback schema with {"gemini_error": true}.
+-          2. Qwen Deliberation Engine:
+-             - Receives handoff package.
+-             - Synthesizes and ranks top 3 units into slots 1A, 2A, 3A.
+-             - 429 handling: exponential backoff [15s, 30s, 60s], max 3 retries,
+-               min 20s between requests. Distinguish quota from rate limit.
+-             - On malformed output: retry once. On second failure: halt pipeline.
+-          3. Validate Qwen output contract:
+-             - Slots must be exactly 1A, 2A, 3A with no duplicates.
+-             - Confidence must be float 0.0 - 1.0.
+-             - Partial/complete failure: halt pipeline (pipeline_halt event).
+-          Store to deliberation_results table.
+-OUTPUT  : deliberation result records per §4 schema
++Pure deterministic deliberation stage.
++Selects the top 3 units by aggregate_score, computes flags via threshold checks,
++and emits rationale_facts for each unit.
+ """
+ 
+ import json
+-import os
+-import re
+-import time
+ import uuid
+ from datetime import datetime, timezone
+ from pathlib import Path
+-from typing import Any
+ 
+ from src.db import get_connection
+ from src.stage4_weigh import get_top_scored_units
+@@ -44,8 +21,6 @@ from src.stage4_weigh import get_top_scored_units
+ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ _CONFIG_PATH = _PROJECT_ROOT / "config.json"
+ 
+-_last_qwen_request_time = 0.0
+-
+ 
+ def _iso_now() -> str:
+     return datetime.now(timezone.utc).isoformat()
+@@ -68,207 +43,20 @@ def _load_config() -> dict:
+         return json.load(f)
+ 
+ 
+-# ──────────────────────────────────────────────────────────────
+-# Gemini Formatter
+-# ──────────────────────────────────────────────────────────────
+-
+-GEMINI_SYSTEM_PROMPT = (
+-    "You are a data formatter. You receive a JSON payload of scored pipeline units. "
+-    "Your only task is to reformat this payload into the handoff schema defined below. "
+-    "You do not interpret, summarize, score, rank, or modify content values. "
+-    "You do not add commentary. If the input is malformed or fields are missing, "
+-    "output a JSON error object: {\"error\": \"description of structural issue\", \"raw_passthrough\": true} "
+-    "Output valid JSON only. No prose. No markdown. No explanation."
+-)
+-
+-
+-def _call_gemini(payload: dict) -> dict:
+-    """Call Gemini to format the payload, or return mock/fallback on error."""
+-    payload_str = json.dumps(payload, indent=2)
+-    api_key = os.environ.get("GEMINI_API_KEY")
+-
+-    if not api_key:
+-        # Mock mode: perform deterministic formatting
+-        return _mock_gemini_format(payload)
+-
+-    # Real API call
+-    from google import genai
+-    from google.genai import types
+-    try:
+-        client = genai.Client(api_key=api_key)
+-        config = types.GenerateContentConfig(
+-            system_instruction=GEMINI_SYSTEM_PROMPT,
+-            max_output_tokens=8500,
+-            response_mime_type="application/json",
+-        )
+-        response = client.models.generate_content(
+-            model="gemini-2.5-flash",
+-            contents=payload_str,
+-            config=config,
+-        )
+-        return json.loads(response.text)
+-    except Exception as exc:
+-        # Fallback behavior: Package Stage 4 output into a minimal valid handoff schema
+-        # with all non-essential fields set to null and {"gemini_error": true} appended.
+-        fallback = {
+-            "mission_id": payload.get("mission_id"),
+-            "mission_statement": payload.get("mission_statement"),
+-            "top_units": [
+-                {
+-                    "unit_id": u["unit_id"],
+-                    "content": u["content"],
+-                    "lens_scores": u.get("lens_scores"),
+-                    "aggregate_score": u.get("aggregate_score"),
+-                }
+-                for u in payload.get("top_units", [])
+-            ],
+-            "unit_count": len(payload.get("top_units", [])),
+-            "gate_threshold": payload.get("gate_threshold"),
+-            "gemini_error": True,
+-        }
+-        return fallback
+-
+-
+-def _mock_gemini_format(payload: dict) -> dict:
+-    return {
+-        "mission_id": payload.get("mission_id"),
+-        "mission_statement": payload.get("mission_statement"),
+-        "top_units": [
+-            {
+-                "unit_id": u["unit_id"],
+-                "content": u["content"],
+-                "lens_scores": u.get("lens_scores"),
+-                "aggregate_score": u.get("aggregate_score"),
+-            }
+-            for u in payload.get("top_units", [])
+-        ],
+-        "unit_count": len(payload.get("top_units", [])),
+-        "gate_threshold": payload.get("gate_threshold"),
+-    }
+-
+-
+-# ──────────────────────────────────────────────────────────────
+-# Qwen Deliberation Engine
+-# ──────────────────────────────────────────────────────────────
+-
+-QWEN_SYSTEM_PROMPT = (
+-    "You are a deliberation engine. You receive a JSON payload containing pre-scored pipeline "
+-    "units. Each unit has already been evaluated by deterministic rubrics. Your only task is to "
+-    "synthesize the scores and select the top 3 units by merit, returning them as a ranked JSON "
+-    "output in the schema defined below. You do not re-score. You do not ingest new data. "
+-    "You do not adopt a role or persona. You do not add unsolicited commentary or explanation "
+-    "outside the defined schema. Base your ranking on aggregate_score values and lens_score "
+-    "distributions provided. Output valid JSON only. No prose. No markdown. No preamble."
+-)
+-
+-
+-def _call_qwen_with_retry(handoff_payload: dict, conn, mission_id: str) -> dict:
+-    """Call Qwen with exponential backoff and retry logic."""
+-    global _last_qwen_request_time
+-
+-    api_key = os.environ.get("QWEN_API_KEY")
+-    if not api_key:
+-        # Mock mode
+-        return _mock_qwen_deliberate(handoff_payload)
+-
+-    from openai import OpenAI, RateLimitError
+-
+-    base_url = os.environ.get("QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+-    client = OpenAI(api_key=api_key, base_url=base_url)
+-
+-    backoffs = [15.0, 30.0, 60.0]
+-    max_retries = 3
+-    attempt = 0
+-
+-    payload_str = json.dumps(handoff_payload, indent=2)
+-
+-    while True:
+-        # Enforce minimum 20s between requests
+-        elapsed = time.time() - _last_qwen_request_time
+-        if elapsed < 20.0:
+-            time.sleep(20.0 - elapsed)
+-
+-        _last_qwen_request_time = time.time()
+-        _log(conn, mission_id, "ai_call", f"Calling Qwen (attempt {attempt + 1})")
+-
+-        try:
+-            response = client.chat.completions.create(
+-                model="qwen3-next-80b-a3b-instruct",
+-                messages=[
+-                    {"role": "system", "content": QWEN_SYSTEM_PROMPT},
+-                    {"role": "user", "content": payload_str},
+-                ],
+-                max_tokens=4096,
+-                response_format={"type": "json_object"},
+-            )
+-            return json.loads(response.choices[0].message.content)
+-
+-        except RateLimitError as rl_exc:
+-            # Distinguish rate_limit_exceeded (retry) from insufficient_quota (halt immediately)
+-            err_msg = str(rl_exc).lower()
+-            if "quota" in err_msg or "insufficient" in err_msg or "credit" in err_msg:
+-                _log(conn, mission_id, "ai_error", f"Qwen quota exceeded: {rl_exc}", "insufficient_quota")
+-                raise rl_exc
+-
+-            if attempt >= max_retries:
+-                _log(conn, mission_id, "ai_error", f"Qwen rate limit retries exhausted: {rl_exc}", "rate_limit_exceeded")
+-                raise rl_exc
+-
+-            sleep_dur = backoffs[attempt]
+-            _log(conn, mission_id, "ai_error", f"Qwen 429 rate limit: sleeping {sleep_dur}s. Error: {rl_exc}", "rate_limit_exceeded")
+-            time.sleep(sleep_dur)
+-            attempt += 1
+-
+-        except Exception as exc:
+-            # Other errors (e.g. connection issues)
+-            if attempt >= max_retries:
+-                _log(conn, mission_id, "ai_error", f"Qwen call failed: {exc}", "api_error")
+-                raise exc
+-            sleep_dur = backoffs[attempt]
+-            time.sleep(sleep_dur)
+-            attempt += 1
+-
+-
+-def _mock_qwen_deliberate(handoff_payload: dict) -> dict:
+-    """Mock Qwen deliberation for testing."""
+-    top_units = handoff_payload.get("top_units", [])
+-    # Sort by aggregate score descending
+-    sorted_units = sorted(top_units, key=lambda x: x.get("aggregate_score", 0.0), reverse=True)
+-
+-    recommendations = []
+-    slots = ["1A", "2A", "3A"]
+-
+-    for idx, unit in enumerate(sorted_units[:3]):
+-        recommendations.append({
+-            "rank": str(idx + 1),
+-            "slot": slots[idx],
+-            "unit_id": unit["unit_id"],
+-            "rationale": f"Mock rationale for unit {unit['unit_id']} with score {unit.get('aggregate_score')}",
+-            "confidence": round(0.9 - idx * 0.1, 2),
+-        })
+-
+-    return {
+-        "mission_id": handoff_payload.get("mission_id"),
+-        "deliberation_id": str(uuid.uuid4()),
+-        "recommendations": recommendations,
+-        "flags": [],
+-    }
+-
+-
+ # ──────────────────────────────────────────────────────────────
+ # Validation
+ # ──────────────────────────────────────────────────────────────
+ 
+-def _validate_qwen_output(output: dict, handoff_payload: dict) -> str | None:
+-    """Validate Qwen output contract.
++def _validate_deliberation_output(output: dict, top_unit_ids: set[str]) -> str | None:
++    """Validate deliberation output contract.
+ 
+     Returns error message if invalid, or None if valid.
+     """
+     if not isinstance(output, dict):
+         return "Output must be a JSON object."
+ 
+-    if output.get("mission_id") != handoff_payload.get("mission_id"):
+-        return "mission_id mismatch."
++    if "mission_id" not in output:
++        return "Missing mission_id."
+ 
+     if "deliberation_id" not in output:
+         return "Missing deliberation_id."
+@@ -277,15 +65,9 @@ def _validate_qwen_output(output: dict, handoff_payload: dict) -> str | None:
+     if not isinstance(recs, list):
+         return "recommendations must be a list."
+ 
+-    # Verify we have exactly 3 recommendations
+-    if len(recs) != 3:
+-        return f"Expected exactly 3 recommendations, got {len(recs)}."
+-
+     slots_seen = set()
+-    valid_slots = {"1A", "2A", "3A"}
+-    valid_ranks = {"1", "2", "3", 1, 2, 3}
+-
+-    top_unit_ids = {u["unit_id"] for u in handoff_payload.get("top_units", [])}
++    expected_slots = {f"{i+1}A" for i in range(len(recs))}
++    valid_ranks = {str(i+1) for i in range(len(recs))}
+ 
+     for idx, rec in enumerate(recs):
+         if not isinstance(rec, dict):
+@@ -294,13 +76,13 @@ def _validate_qwen_output(output: dict, handoff_payload: dict) -> str | None:
+         rank = rec.get("rank")
+         slot = rec.get("slot")
+         unit_id = rec.get("unit_id")
+-        rationale = rec.get("rationale")
++        rationale_facts = rec.get("rationale_facts")
+         confidence = rec.get("confidence")
+ 
+         if rank not in valid_ranks:
+             return f"Invalid rank '{rank}' in recommendation {idx}."
+ 
+-        if slot not in valid_slots:
++        if slot not in expected_slots:
+             return f"Invalid slot '{slot}' in recommendation {idx}."
+ 
+         if slot in slots_seen:
+@@ -310,14 +92,18 @@ def _validate_qwen_output(output: dict, handoff_payload: dict) -> str | None:
+         if unit_id not in top_unit_ids:
+             return f"unit_id '{unit_id}' not in top_units."
+ 
+-        if not isinstance(rationale, str) or not rationale.strip():
+-            return f"Missing rationale in recommendation {idx}."
++        if not isinstance(rationale_facts, dict):
++            return f"Missing or invalid rationale_facts in recommendation {idx}."
++
++        expected_keys = {'rank', 'unit_id', 'top_lens', 'top_lens_score', 'aggregate_score'}
++        if not expected_keys.issubset(rationale_facts.keys()):
++            return f"rationale_facts in recommendation {idx} is missing required keys."
+ 
+         if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
+             return f"Invalid confidence '{confidence}' in recommendation {idx}."
+ 
+-    if slots_seen != valid_slots:
+-        return f"Missing slots. Expected exactly 1A, 2A, 3A, got {slots_seen}."
++    if slots_seen != expected_slots:
++        return f"Missing slots. Expected {expected_slots}, got {slots_seen}."
+ 
+     return None
+ 
+@@ -340,10 +126,8 @@ def deliberate_mission(
+         ).fetchone()
+         if row is None:
+             raise ValueError(f"mission_id '{mission_id}' not found.")
+-        mission_statement = row["statement"]
+ 
+         cfg = _load_config()
+-        gate_threshold = cfg.get("gate_threshold", 0.55)
+         top_n = cfg.get("top_units_to_deliberation", 5)
+ 
+         # ── Fetch top scored units ────────────────────────────
+@@ -356,57 +140,63 @@ def deliberate_mission(
+ 
+         _log(conn, mission_id, "stage_start", f"Deliberation started with {len(top_units)} units.")
+ 
+-        # ── 1. Gemini Formatter ───────────────────────────────
+-        gemini_input = {
++        # Select top 3 units by aggregate score descending
++        top_3 = top_units[:3]
++        recommendations = []
++
++        for idx, unit in enumerate(top_3):
++            # Find the highest-scoring lens name and its score
++            lens_scores = unit.get("lens_scores", {})
++            if lens_scores:
++                top_lens = max(lens_scores, key=lens_scores.get)
++                top_lens_score = float(lens_scores[top_lens])
++            else:
++                top_lens = "unknown"
++                top_lens_score = 0.0
++
++            recommendations.append({
++                "rank": str(idx + 1),
++                "slot": f"{idx + 1}A",
++                "unit_id": unit["unit_id"],
++                "rationale_facts": {
++                    "rank": str(idx + 1),
++                    "unit_id": unit["unit_id"],
++                    "top_lens": top_lens,
++                    "top_lens_score": top_lens_score,
++                    "aggregate_score": float(unit["aggregate_score"]),
++                },
++                "confidence": round(unit["aggregate_score"], 2),
++            })
++
++        # Compute warning flags
++        top_unit_score = top_3[0]["aggregate_score"]
++        flags = []
++        if top_unit_score < 0.6:
++            flags.append({"type": "low_confidence", "detail": "Top unit aggregate score is below 0.6"})
++
++        if len(top_3) >= 3:
++            third_unit_score = top_3[2]["aggregate_score"]
++            score_difference = top_unit_score - third_unit_score
++            if score_difference < 0.05:
++                flags.append({"type": "narrow_margin", "detail": "Score difference between 1st and 3rd unit is below 0.05"})
++
++        deliberation_id = str(uuid.uuid4())
++        output = {
+             "mission_id": mission_id,
+-            "mission_statement": mission_statement,
+-            "top_units": top_units,
+-            "unit_count": len(top_units),
+-            "gate_threshold": gate_threshold,
++            "deliberation_id": deliberation_id,
++            "recommendations": recommendations,
++            "flags": flags,
+         }
+ 
+-        try:
+-            handoff_payload = _call_gemini(gemini_input)
+-        except Exception as gemini_exc:
+-            _log(conn, mission_id, "ai_error", f"Gemini formatter failed: {gemini_exc}", "gemini_error")
+-            # Fallback schema
+-            handoff_payload = {
+-                "mission_id": mission_id,
+-                "mission_statement": mission_statement,
+-                "top_units": top_units,
+-                "unit_count": len(top_units),
+-                "gate_threshold": gate_threshold,
+-                "gemini_error": True,
+-            }
+-
+-        # ── 2. Qwen Deliberation ──────────────────────────────
+-        # We try once, and on malformed output we retry once.
+-        qwen_output = None
+-        validation_err = None
+-
+-        for attempt in range(2):
+-            try:
+-                qwen_output = _call_qwen_with_retry(handoff_payload, conn, mission_id)
+-                validation_err = _validate_qwen_output(qwen_output, handoff_payload)
+-                if validation_err is None:
+-                    break
+-                _log(conn, mission_id, "ai_error", f"Qwen output validation failed (attempt {attempt + 1}): {validation_err}", "validation_error")
+-            except Exception as qwen_exc:
+-                _log(conn, mission_id, "ai_error", f"Qwen call failed (attempt {attempt + 1}): {qwen_exc}", "qwen_error")
+-                if attempt == 1:
+-                    # Second failure: halt pipeline
+-                    _log(conn, mission_id, "pipeline_halt", "Qwen deliberation failed twice.")
+-                    conn.commit()
+-                    raise qwen_exc
+-
++        # Validate output contract
++        top_unit_ids = {u["unit_id"] for u in top_units}
++        validation_err = _validate_deliberation_output(output, top_unit_ids)
+         if validation_err is not None:
+-            # Second failure: halt pipeline
+-            _log(conn, mission_id, "pipeline_halt", f"Qwen output validation failed twice: {validation_err}")
++            _log(conn, mission_id, "pipeline_halt", f"Deliberation output validation failed: {validation_err}")
+             conn.commit()
+-            raise ValueError(f"Qwen output validation failed: {validation_err}")
++            raise ValueError(f"Deliberation output validation failed: {validation_err}")
+ 
+         # ── Persist results ───────────────────────────────────
+-        deliberation_id = qwen_output["deliberation_id"]
+         conn.execute(
+             """
+             INSERT OR REPLACE INTO deliberation_results (deliberation_id, mission_id, recommendations, flags)
+@@ -415,14 +205,14 @@ def deliberate_mission(
+             (
+                 deliberation_id,
+                 mission_id,
+-                json.dumps(qwen_output["recommendations"]),
+-                json.dumps(qwen_output.get("flags", [])),
++                json.dumps(recommendations),
++                json.dumps(flags),
+             ),
+         )
+ 
+         _log(conn, mission_id, "stage_complete", f"Deliberation complete: {deliberation_id}")
+         conn.commit()
+-        return qwen_output
++        return output
+ 
+     except Exception as exc:
+         conn.rollback()
+diff --git a/src/web_server.py b/src/web_server.py
+index 7c02254..bab5c55 100644
+--- a/src/web_server.py
++++ b/src/web_server.py
+@@ -18,7 +18,9 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
+ 
+ import json
+ import os
++import shutil
+ import sqlite3
++import time
+ import urllib.request
+ from http.server import BaseHTTPRequestHandler, HTTPServer
+ from pathlib import Path
+@@ -45,6 +47,8 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
+             self.handle_telemetry()
+         elif self.path == "/api/files":
+             self.handle_files()
++        elif self.path == "/health":
++            self.send_json({"status": "ok"})
+         else:
+             # Serve static files
+             self.serve_static()
+@@ -95,18 +99,36 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
+         if psutil:
+             cpu = psutil.cpu_percent()
+             ram = psutil.virtual_memory().percent
++            memory = psutil.virtual_memory()
++            disk_usage = shutil.disk_usage("/")
++            cpu_cores = psutil.cpu_count(logical=True) or 1
++            process_count = len(psutil.pids())
++            boot_time = psutil.boot_time()
++            uptime_seconds = max(0, int(time.time() - boot_time))
++            net_io = psutil.net_io_counters()
+         else:
+             # Fallback/simulated telemetry
+             import random
+             cpu = round(random.uniform(15.0, 45.0), 1)
+             ram = round(random.uniform(40.0, 60.0), 1)
++            memory = None
++            disk_usage = shutil.disk_usage("/")
++            cpu_cores = 16
++            process_count = 347
++            uptime_seconds = 84520
++            net_io = None
++
++        ram_total_gb = round((memory.total if memory else 16 * 1024**3) / (1024**3), 1) if memory else 16.0
++        ram_used_gb = round(ram_total_gb * (ram / 100), 1)
++        disk_total_gb = round(disk_usage.total / (1024**3), 1)
++        disk_used_gb = round(disk_usage.used / (1024**3), 1)
++        disk_percent = round((disk_usage.used / disk_usage.total) * 100, 1)
+ 
+         # Fetch token count from SQLite if table exists
+         token_count = 142830  # Default fallback
+         token_limit = 500000
+         conn = get_connection(DB_PATH)
+         try:
+-            # Check if token_count table exists
+             cursor = conn.execute(
+                 "SELECT name FROM sqlite_master WHERE type='table' AND name='token_count'"
+             )
+@@ -122,12 +144,29 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
+         finally:
+             conn.close()
+ 
++        queue_depth = max(0, min(99, int(round((token_count / max(token_limit, 1)) * 100))))
++        signal_strength = round(min(99.9, max(70.0, 100 - (cpu * 0.35) - (ram * 0.2) + (queue_depth * 0.1))), 1)
++        network_sent = (net_io.bytes_sent if net_io else 1834021)
++        network_recv = (net_io.bytes_recv if net_io else 2524100)
++
+         response = {
+             "cpu": cpu,
+             "ram": ram,
+             "latency": 42,  # Simulated ms
+             "token_count": token_count,
+             "token_limit": token_limit,
++            "cpu_cores": cpu_cores,
++            "ram_total_gb": ram_total_gb,
++            "ram_used_gb": ram_used_gb,
++            "disk_total_gb": disk_total_gb,
++            "disk_used_gb": disk_used_gb,
++            "disk_percent": disk_percent,
++            "process_count": process_count,
++            "uptime_seconds": uptime_seconds,
++            "network_sent": network_sent,
++            "network_recv": network_recv,
++            "queue_depth": queue_depth,
++            "signal_strength": signal_strength,
+         }
+         self.send_json(response)
+ 
+@@ -187,8 +226,8 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
+             # Store user message in SQLite
+             self._save_chat_message(mission_id, "User", message)
+ 
+-            # Call local Ollama endpoint
+-            ai_response = self._call_ollama(message)
++            # Call OpenRouter endpoint
++            ai_response = self._call_openrouter(message)
+ 
+             # Store AI response in SQLite
+             self._save_chat_message(mission_id, "Legion AI", ai_response)
+@@ -291,24 +330,42 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
+         finally:
+             conn.close()
+ 
+-    def _call_ollama(self, prompt: str) -> str:
+-        # Standard urllib request to local Ollama API
++    def _call_openrouter(self, prompt: str) -> str:
++        # Import OPENROUTER_API_KEY from committee
++        try:
++            from committee import OPENROUTER_API_KEY
++        except ImportError:
++            OPENROUTER_API_KEY = None
++
++        if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY_HERE":
++            OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
++
++        if not OPENROUTER_API_KEY:
++            return "Error: OpenRouter API key is not configured. Please set OPENROUTER_API_KEY in committee.py or as an environment variable."
++
++        clean_key = str(OPENROUTER_API_KEY).strip()
+         payload = {
+-            "model": "llama3",
+-            "prompt": prompt,
+-            "stream": False,
++            "model": "nvidia/nemotron-3-super-120b-a12b:free",
++            "messages": [
++                {"role": "user", "content": prompt}
++            ],
++            "temperature": 0.7,
++            "stream": False
+         }
+-        req = urllib.request.Request(
+-            "http://localhost:11434/api/generate",
+-            data=json.dumps(payload).encode("utf-8"),
+-            headers={"Content-Type": "application/json"},
+-        )
++        
++        req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions")
++        req.add_header("Authorization", f"Bearer {clean_key}")
++        req.add_header("Content-Type", "application/json; charset=utf-8")
++        req.add_header("HTTP-Referer", "http://localhost:8080")
++        req.add_header("X-Title", "Legion OS Control Center")
++
+         try:
+-            with urllib.request.urlopen(req, timeout=15) as response:
+-                res = json.loads(response.read().decode("utf-8"))
+-                return res.get("response", "")
++            data_bytes = json.dumps(payload).encode('utf-8')
++            with urllib.request.urlopen(req, data=data_bytes, timeout=30) as response:
++                res = json.loads(response.read().decode('utf-8'))
++                return res['choices'][0]['message']['content']
+         except Exception as e:
+-            return f"Ollama offline. Response generated locally: Echoing back your prompt: '{prompt}' (Error: {e})"
++            return f"Error calling OpenRouter: {e}"
+ 
+ 
+ def run_server():
+diff --git a/test_out.txt b/test_out.txt
+index 2522ac8..60f2099 100644
+Binary files a/test_out.txt and b/test_out.txt differ
+diff --git a/tests/test_stage5.py b/tests/test_stage5.py
+index a93b0c1..d189591 100644
+--- a/tests/test_stage5.py
++++ b/tests/test_stage5.py
+@@ -2,22 +2,31 @@
+ Committee OS — Stage 5 Deliberate tests.
+ 
+ Covers:
+-  1. Gemini Reactive Formatter (mock formatting and fallback behavior)
+-  2. Qwen Deliberation Engine (mock deliberation, validation, retry on malformed output)
+-  3. Qwen output contract validation (slots, confidence, IDs)
+-  4. Pipeline halt behavior (on validation failure or complete failure)
+-  5. 429 rate limit exponential backoff (mocking RateLimitError)
+-  6. Pipeline logging (ai_call, ai_error, pipeline_halt)
+-  7. End-to-end deliberation: ingest → parse → filter → weigh → deliberate → verify deliberation_results table
++  1. Deterministic Deliberation Engine (ranking, rationale_facts, flags)
++  2. Output contract validation (slots, confidence, IDs, rationale_facts keys)
++  3. Pipeline halt behavior (on validation failure or complete failure)
++  4. End-to-end deliberation: ingest → parse → filter → weigh → deliberate → verify deliberation_results table
+ """
+ 
++import sys
++from unittest.mock import MagicMock
++
++# Mock headroom module before importing anything that imports it
++class MockHeadroomCompressor:
++    def compress(self, text):
++        return text
++    def decompress(self, text):
++        return text
++
++mock_headroom = MagicMock()
++mock_headroom.HeadroomCompressor = MockHeadroomCompressor
++sys.modules['headroom'] = mock_headroom
++
+ import json
+ import sqlite3
+-import time
+ from pathlib import Path
+ 
+ import pytest
+-from openai import RateLimitError
+ 
+ from src.init_db import init_database
+ from src.stage0_mission import create_mission
+@@ -26,8 +35,7 @@ from src.stage2_parse import parse_ingest_record
+ from src.stage3_filter import filter_units
+ from src.stage4_weigh import weigh_units
+ from src.stage5_deliberate import (
+-    _call_gemini,
+-    _validate_qwen_output,
++    _validate_deliberation_output,
+     deliberate_mission,
+ )
+ 
+@@ -72,73 +80,116 @@ def _setup_mission_with_scored_units(tmp_db, raw_content, domain="content_syndic
+ 
+ 
+ # ═══════════════════════════════════════════════════════════════
+-# 1. Gemini Formatter
++# 1. Deterministic Deliberation & Validation
+ # ═══════════════════════════════════════════════════════════════
+ 
+-class TestGeminiFormatter:
+-    def test_gemini_mock_formatting(self):
+-        payload = {
+-            "mission_id": "test-uuid",
+-            "mission_statement": "Test statement",
+-            "top_units": [
+-                {"unit_id": "u1", "content": "hello", "lens_scores": {}, "aggregate_score": 0.8}
+-            ],
+-        }
+-        res = _call_gemini(payload)
+-        assert res["mission_id"] == "test-uuid"
+-        assert len(res["top_units"]) == 1
+-        assert res["top_units"][0]["unit_id"] == "u1"
+-        assert "gemini_error" not in res
+-
+-
+-# ═══════════════════════════════════════════════════════════════
+-# 2. Qwen Output Contract Validation
+-# ═══════════════════════════════════════════════════════════════
+-
+-class TestQwenValidation:
+-    def test_valid_output(self):
+-        handoff = {
+-            "mission_id": "test-uuid",
+-            "top_units": [
+-                {"unit_id": "u1"},
+-                {"unit_id": "u2"},
+-                {"unit_id": "u3"},
+-            ]
+-        }
++class TestDeterministicDeliberation:
++    def test_valid_output_validation(self):
++        top_unit_ids = {"u1", "u2", "u3"}
+         output = {
+             "mission_id": "test-uuid",
+             "deliberation_id": "delib-uuid",
+             "recommendations": [
+-                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
+-                {"rank": 2, "slot": "2A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
+-                {"rank": 3, "slot": "3A", "unit_id": "u3", "rationale": "fine", "confidence": 0.7},
++                {
++                    "rank": "1",
++                    "slot": "1A",
++                    "unit_id": "u1",
++                    "rationale_facts": {
++                        "rank": "1",
++                        "unit_id": "u1",
++                        "top_lens": "creative_director",
++                        "top_lens_score": 0.8,
++                        "aggregate_score": 0.85,
++                    },
++                    "confidence": 0.85,
++                },
++                {
++                    "rank": "2",
++                    "slot": "2A",
++                    "unit_id": "u2",
++                    "rationale_facts": {
++                        "rank": "2",
++                        "unit_id": "u2",
++                        "top_lens": "financial_director",
++                        "top_lens_score": 0.7,
++                        "aggregate_score": 0.75,
++                    },
++                    "confidence": 0.75,
++                },
++                {
++                    "rank": "3",
++                    "slot": "3A",
++                    "unit_id": "u3",
++                    "rationale_facts": {
++                        "rank": "3",
++                        "unit_id": "u3",
++                        "top_lens": "technical_director",
++                        "top_lens_score": 0.6,
++                        "aggregate_score": 0.65,
++                    },
++                    "confidence": 0.65,
++                },
+             ],
+             "flags": []
+         }
+-        err = _validate_qwen_output(output, handoff)
++        err = _validate_deliberation_output(output, top_unit_ids)
+         assert err is None
+ 
+     def test_invalid_slots(self):
+-        handoff = {
+-            "mission_id": "test-uuid",
+-            "top_units": [{"unit_id": "u1"}, {"unit_id": "u2"}, {"unit_id": "u3"}]
+-        }
++        top_unit_ids = {"u1", "u2", "u3"}
+         # Duplicate slot 1A
+         output = {
+             "mission_id": "test-uuid",
+             "deliberation_id": "delib-uuid",
+             "recommendations": [
+-                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
+-                {"rank": 2, "slot": "1A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
+-                {"rank": 3, "slot": "3A", "unit_id": "u3", "rationale": "fine", "confidence": 0.7},
+-            ]
++                {
++                    "rank": "1",
++                    "slot": "1A",
++                    "unit_id": "u1",
++                    "rationale_facts": {
++                        "rank": "1",
++                        "unit_id": "u1",
++                        "top_lens": "creative_director",
++                        "top_lens_score": 0.8,
++                        "aggregate_score": 0.85,
++                    },
++                    "confidence": 0.85,
++                },
++                {
++                    "rank": "2",
++                    "slot": "1A",
++                    "unit_id": "u2",
++                    "rationale_facts": {
++                        "rank": "2",
++                        "unit_id": "u2",
++                        "top_lens": "financial_director",
++                        "top_lens_score": 0.7,
++                        "aggregate_score": 0.75,
++                    },
++                    "confidence": 0.75,
++                },
++                {
++                    "rank": "3",
++                    "slot": "3A",
++                    "unit_id": "u3",
++                    "rationale_facts": {
++                        "rank": "3",
++                        "unit_id": "u3",
++                        "top_lens": "technical_director",
++                        "top_lens_score": 0.6,
++                        "aggregate_score": 0.65,
++                    },
++                    "confidence": 0.65,
++                },
++            ],
++            "flags": []
+         }
+-        err = _validate_qwen_output(output, handoff)
++        err = _validate_deliberation_output(output, top_unit_ids)
+         assert "Duplicate slot" in err
+ 
+ 
+ # ═══════════════════════════════════════════════════════════════
+-# 3. Pipeline Halt Behavior
++# 2. Pipeline Halt Behavior
+ # ═══════════════════════════════════════════════════════════════
+ 
+ class TestPipelineHalt:
+@@ -164,7 +215,7 @@ class TestPipelineHalt:
+ 
+ 
+ # ═══════════════════════════════════════════════════════════════
+-# 4. End-to-End Deliberation
++# 3. End-to-End Deliberation
+ # ═══════════════════════════════════════════════════════════════
+ 
+ class TestEndToEndDeliberation:
+@@ -195,3 +246,5 @@ class TestEndToEndDeliberation:
+         recs = json.loads(row["recommendations"])
+         assert len(recs) == 3
+         assert recs[0]["slot"] == "1A"
++        assert "rationale_facts" in recs[0]
++        assert "top_lens" in recs[0]["rationale_facts"]

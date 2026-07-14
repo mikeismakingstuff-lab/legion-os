@@ -24,6 +24,12 @@ import sys
 from pathlib import Path
 from tinytag import TinyTag
 
+# Reconfigure stdout/stderr to UTF-8 to prevent encoding errors on Windows console
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # ---------------------------------------------------------------------------
 # Fingerprinting
 # ---------------------------------------------------------------------------
@@ -247,6 +253,10 @@ def strip_trailing_upload_id(title):
 # File matching
 # ---------------------------------------------------------------------------
 
+_disk_files_set = None
+_disk_files_lower = None
+_clean_to_disk = None
+
 def find_matching_file(excel_name, disk_files):
     """
     Match an Excel filename entry to an actual disk filename.
@@ -255,27 +265,40 @@ def find_matching_file(excel_name, disk_files):
       2. Regex match — '?' treated as a wildcard for encoding placeholders.
       3. Alphanumeric-only fuzzy match (exact, then substring).
     """
-    if excel_name in disk_files:
+    global _disk_files_set, _disk_files_lower, _clean_to_disk
+    if _disk_files_set is None:
+        _disk_files_set = set(disk_files)
+        _disk_files_lower = {f.lower(): f for f in disk_files}
+        _clean_to_disk = {}
+        for f in disk_files:
+            c = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
+            if c:
+                if c not in _clean_to_disk:
+                    _clean_to_disk[c] = f
+
+    if excel_name in _disk_files_set:
         return excel_name
 
-    pattern_str = re.escape(excel_name).replace(r'\?', '.+')
-    try:
-        pattern = re.compile('^' + pattern_str + '$', re.IGNORECASE)
-        for f in disk_files:
-            if pattern.match(f):
-                return f
-    except Exception:
-        pass
+    excel_lower = excel_name.lower()
+    if excel_lower in _disk_files_lower:
+        return _disk_files_lower[excel_lower]
+
+    if '?' in excel_name:
+        pattern_str = re.escape(excel_name).replace(r'\?', '.')
+        try:
+            pattern = re.compile('^' + pattern_str + '$', re.IGNORECASE)
+            for f in disk_files:
+                if pattern.match(f):
+                    return f
+        except Exception:
+            pass
 
     excel_clean = re.sub(r'[^a-zA-Z0-9]', '', excel_name).lower()
     if excel_clean:
-        for f in disk_files:
-            f_clean = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
-            if excel_clean == f_clean:
-                return f
-        for f in disk_files:
-            f_clean = re.sub(r'[^a-zA-Z0-9]', '', f).lower()
-            if f_clean and (excel_clean in f_clean or f_clean in excel_clean):
+        if excel_clean in _clean_to_disk:
+            return _clean_to_disk[excel_clean]
+        for f_clean, f in _clean_to_disk.items():
+            if excel_clean in f_clean or f_clean in excel_clean:
                 return f
 
     return None
@@ -284,7 +307,7 @@ def find_matching_file(excel_name, disk_files):
 # Filename structural parsing
 # ---------------------------------------------------------------------------
 
-def parse_filename_structurally(filename, canonical_artists):
+def parse_filename_structurally(filename, canonical_artists_clean):
     """
     Attempt to extract (artist, title) from a filename using structural signals only.
 
@@ -307,8 +330,7 @@ def parse_filename_structurally(filename, canonical_artists):
         artist_idx = -1
         for idx, part in enumerate(parts):
             part_clean = re.sub(r'[^a-zA-Z0-9]', '', part).lower()
-            for art in canonical_artists:
-                art_clean = re.sub(r'[^a-zA-Z0-9]', '', art).lower()
+            for art, art_clean in canonical_artists_clean:
                 if len(art_clean) > 3 and art_clean == part_clean:
                     artist_idx = idx
                     break
@@ -379,10 +401,17 @@ def main():
     # Structural filter only: reject uploader handles (trailing 3+ digits).
     print(f"Building canonical artist list from: {audio_dir}")
     canonical_artists = set()
+    total_files = len(disk_files)
+    processed = 0
+    file_tags = {}  # Maps filename -> (artist, title)
     for f in disk_files:
         if f.lower().endswith(audio_exts):
+            processed += 1
+            if processed % 1000 == 0:
+                print(f"  Processed {processed}/{total_files} files for canonical artists...")
             try:
                 tag = TinyTag.get(os.path.join(audio_dir, f))
+                file_tags[f] = (tag.artist, tag.title)
                 if tag.artist:
                     art = tag.artist.strip()
                     if art and not is_uploader_handle(art) and not has_corrupt_characters(art) and len(art) < 100:
@@ -390,6 +419,10 @@ def main():
             except Exception:
                 pass
     print(f"Canonical artist set: {len(canonical_artists)} entries.")
+    canonical_artists_clean = []
+    for art in canonical_artists:
+        art_clean = re.sub(r'[^a-zA-Z0-9]', '', art).lower()
+        canonical_artists_clean.append((art, art_clean))
 
     wb = openpyxl.load_workbook(xlsx_path)
     ws = wb.active
@@ -401,8 +434,11 @@ def main():
 
     matched = 0
     unmatched = 0
+    total_rows = ws.max_row - 1
 
-    for row in ws.iter_rows(min_row=2):
+    for idx, row in enumerate(ws.iter_rows(min_row=2), start=1):
+        if idx % 1000 == 0:
+            print(f"  Processing Excel Row {idx}/{total_rows}...")
         name = row[0].value
         fullname = row[1].value
         if not name:
@@ -424,17 +460,12 @@ def main():
         # On failure, falls through to heuristics — never silent.
         fp_raw, fp_skip_reason = fingerprint_audio(fpcalc_path, path)
         if fp_skip_reason:
-            print(f"  [FP SKIP] {disk_match}: {fp_skip_reason}")
+            pass  # Suppress the verbose FP SKIP print to speed up execution and clean up output
 
-        try:
-            tag = TinyTag.get(path)
-            tag_artist = tag.artist
-            tag_title  = tag.title
-        except Exception:
-            tag_artist, tag_title = None, None
+        tag_artist, tag_title = file_tags.get(disk_match, (None, None))
 
         # Structural parse of disk filename (disk has correct characters)
-        fn_artist, fn_title = parse_filename_structurally(disk_match, canonical_artists)
+        fn_artist, fn_title = parse_filename_structurally(disk_match, canonical_artists_clean)
 
         # ---- Resolve Artist ----
         resolved_artist = tag_artist

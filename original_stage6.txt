@@ -2,13 +2,13 @@
 Committee OS — Stage 6: Output.
 
 Deterministic output formatter. No AI involvement.
-Validates output, retrieves unit content, queries summary metrics,
+Validates Qwen output, retrieves unit content, queries summary metrics,
 and persists to pipeline_outputs.
 
 Architecture §4 Contract
 -------------------------
-INPUT   : deliberation output
-PROCESS : 1. Validate output against contract.
+INPUT   : Qwen deliberation output
+PROCESS : 1. Validate Qwen output against contract.
              - If invalid (partial or complete failure): log pipeline_halt, halt.
           2. Map recommendations to slots 1A, 2A, 3A.
           3. Retrieve full unit content from SQLite by unit_id.
@@ -58,7 +58,7 @@ def _load_config() -> dict:
 # ──────────────────────────────────────────────────────────────
 
 def _validate_deliberation_output(output: dict) -> str | None:
-    """Validate output contract.
+    """Validate Qwen output contract.
 
     Returns error message if invalid, or None if valid.
     """
@@ -86,7 +86,7 @@ def _validate_deliberation_output(output: dict) -> str | None:
         rank = rec.get("rank")
         slot = rec.get("slot")
         unit_id = rec.get("unit_id")
-        rationale_facts = rec.get("rationale_facts")
+        rationale = rec.get("rationale")
         confidence = rec.get("confidence")
 
         if rank not in valid_ranks:
@@ -102,12 +102,8 @@ def _validate_deliberation_output(output: dict) -> str | None:
         if not isinstance(unit_id, str) or not unit_id.strip():
             return f"Invalid unit_id in recommendation {idx}."
 
-        if not isinstance(rationale_facts, dict):
-            return f"Missing or invalid rationale_facts in recommendation {idx}."
-
-        expected_keys = {'rank', 'unit_id', 'top_lens', 'top_lens_score', 'aggregate_score'}
-        if not expected_keys.issubset(rationale_facts.keys()):
-            return f"rationale_facts in recommendation {idx} is missing required keys."
+        if not isinstance(rationale, str) or not rationale.strip():
+            return f"Missing rationale in recommendation {idx}."
 
         if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
             return f"Invalid confidence '{confidence}' in recommendation {idx}."
@@ -194,7 +190,7 @@ def generate_pipeline_output(
         for rec in deliberation_output["recommendations"]:
             slot = rec["slot"]
             unit_id = rec["unit_id"]
-            rationale_facts = rec["rationale_facts"]
+            rationale = rec["rationale"]
             confidence = rec["confidence"]
 
             # Fetch unit content from SQLite
@@ -211,7 +207,7 @@ def generate_pipeline_output(
             slots[slot] = {
                 "unit_id": unit_id,
                 "content": row["content"],
-                "rationale_facts": rationale_facts,
+                "rationale": rationale,
                 "confidence": float(confidence),
             }
 

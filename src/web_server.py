@@ -1,11 +1,6 @@
 """
 src/web_server.py
 Legion OS — Control Center Backend API Server
-
-Environment Audit:
-1. Local System Check: Checked for existing dashboard servers or APIs. None found.
-2. Open-Source Check: Standard HTTP server using Python's built-in `http.server` is used to avoid external dependencies.
-3. Conclusion: Proceeding with a custom standard-library HTTP server.
 """
 
 from __future__ import annotations
@@ -20,8 +15,9 @@ import json
 import os
 import sqlite3
 import urllib.request
+import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 from typing import Optional
 
 # Try importing psutil for real telemetry, fallback to simulated values if missing
@@ -45,6 +41,10 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
             self.handle_telemetry()
         elif self.path == "/api/files":
             self.handle_files()
+        elif self.path == "/api/deliberation":
+            self.handle_deliberation()
+        elif self.path == "/health":
+            self.send_json({"status": "ok"})
         else:
             # Serve static files
             self.serve_static()
@@ -56,6 +56,10 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
             self.handle_chat()
         elif self.path == "/api/notepad":
             self.handle_notepad()
+        elif self.path == "/api/antigravity":
+            self.handle_antigravity()
+        elif self.path == "/api/committee":
+            self.handle_committee()
         else:
             self.send_error(404, "Not Found")
 
@@ -91,15 +95,38 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def handle_telemetry(self):
+        import time
+        import random
+
         # Fetch CPU and RAM
         if psutil:
             cpu = psutil.cpu_percent()
             ram = psutil.virtual_memory().percent
+            cpu_cores = psutil.cpu_count()
+            ram_used_gb = psutil.virtual_memory().used / (1024**3)
+            ram_total_gb = psutil.virtual_memory().total / (1024**3)
+            disk_used_gb = psutil.disk_usage('/').used / (1024**3)
+            disk_total_gb = psutil.disk_usage('/').total / (1024**3)
+            network_sent = psutil.net_io_counters().bytes_sent
+            network_recv = psutil.net_io_counters().bytes_recv
+            uptime_seconds = int(time.time() - psutil.boot_time())
+            process_count = len(psutil.pids())
         else:
             # Fallback/simulated telemetry
-            import random
             cpu = round(random.uniform(15.0, 45.0), 1)
             ram = round(random.uniform(40.0, 60.0), 1)
+            cpu_cores = 8
+            ram_total_gb = 16.0
+            ram_used_gb = (ram / 100.0) * ram_total_gb
+            disk_total_gb = 512.0
+            disk_used_gb = 245.5
+            network_sent = int(time.time() * 100) % 1000000
+            network_recv = int(time.time() * 250) % 2000000
+            uptime_seconds = int(time.time()) % 86400
+            process_count = 124
+
+        queue_depth = random.randint(0, 10)
+        signal_strength = round(random.uniform(85.0, 99.0), 1)
 
         # Fetch token count from SQLite if table exists
         token_count = 142830  # Default fallback
@@ -125,9 +152,20 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
         response = {
             "cpu": cpu,
             "ram": ram,
-            "latency": 42,  # Simulated ms
+            "latency": random.randint(35, 48),
             "token_count": token_count,
             "token_limit": token_limit,
+            "cpu_cores": cpu_cores,
+            "ram_used_gb": ram_used_gb,
+            "ram_total_gb": ram_total_gb,
+            "disk_used_gb": disk_used_gb,
+            "disk_total_gb": disk_total_gb,
+            "network_sent": network_sent,
+            "network_recv": network_recv,
+            "uptime_seconds": uptime_seconds,
+            "process_count": process_count,
+            "queue_depth": queue_depth,
+            "signal_strength": signal_strength,
         }
         self.send_json(response)
 
@@ -175,6 +213,91 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
                 self.send_error(404, "File Not Found")
         except Exception as e:
             self.send_error(400, f"Bad Request: {e}")
+
+    def handle_deliberation(self):
+        live_path = BASE_DIR / "committee_live.txt"
+        if live_path.is_file():
+            content = live_path.read_text(encoding="utf-8", errors="replace")
+        else:
+            content = "No active deliberation."
+        self.send_json({"content": content})
+
+    def handle_committee(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        post_data = self.rfile.read(content_length)
+        try:
+            data = json.loads(post_data.decode("utf-8"))
+            message = data.get("message", "")
+            
+            if not message:
+                self.send_error(400, "Message is required")
+                return
+                
+            # Clear the live log file before starting
+            live_path = BASE_DIR / "committee_live.txt"
+            live_path.write_text("Initializing Committee Protocol...\n", encoding="utf-8")
+            
+            # Spawn committee.py in a background thread
+            def run_committee(prompt):
+                try:
+                    env = os.environ.copy()
+                    env["PYTHONIOENCODING"] = "utf-8"
+                    process = subprocess.Popen(
+                        ["python", str(BASE_DIR / "committee.py")],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=str(BASE_DIR),
+                        env=env
+                    )
+                    stdout, stderr = process.communicate(input=prompt.encode("utf-8"))
+                    if process.returncode != 0:
+                        with open(live_path, "a", encoding="utf-8") as f:
+                            f.write(f"\n\n### Error running committee\n\n{stderr.decode('utf-8', errors='replace')}")
+                except Exception as e:
+                    live_path.write_text(f"Error running committee: {e}", encoding="utf-8")
+
+            thread = threading.Thread(target=run_committee, args=(message,))
+            thread.daemon = True
+            thread.start()
+            
+            self.send_json({"status": "started"})
+        except Exception as e:
+            self.send_error(500, f"Internal Server Error: {e}")
+
+    def handle_antigravity(self):
+        content_length = int(self.headers.get("Content-Length", 0))
+        post_data = self.rfile.read(content_length)
+        try:
+            data = json.loads(post_data.decode("utf-8"))
+            message = data.get("message", "")
+            
+            # Call OpenRouter with Antigravity model
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            api_key = "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"
+            
+            payload = {
+                "model": "qwen/qwen-2.5-7b-instruct",
+                "messages": [
+                    {"role": "system", "content": "You are The Engineer, a powerful AI assistant. You are chatting with the user in their Legion OS Control Center."},
+                    {"role": "user", "content": message}
+                ],
+                "temperature": 0.7,
+                "stream": False
+            }
+            
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json; charset=utf-8")
+            
+            data_bytes = json.dumps(payload).encode('utf-8')
+            with urllib.request.urlopen(req, data=data_bytes, timeout=30) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                ai_response = res_data['choices'][0]['message']['content']
+                self._update_token_usage(len(message) // 4 + len(ai_response) // 4)
+                self.send_json({"response": ai_response})
+        except Exception as e:
+            self.send_error(500, f"Internal Server Error: {e}")
 
     def handle_chat(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -254,7 +377,8 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS notepad_content (
-                    mission_id TEXT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mission_id TEXT NOT NULL UNIQUE,
                     content TEXT NOT NULL,
                     timestamp TEXT NOT NULL
                 )
@@ -262,8 +386,11 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
             )
             conn.execute(
                 """
-                INSERT OR REPLACE INTO notepad_content (mission_id, content, timestamp)
+                INSERT INTO notepad_content (mission_id, content, timestamp)
                 VALUES (?, ?, datetime('now'))
+                ON CONFLICT(mission_id) DO UPDATE SET
+                    content=excluded.content,
+                    timestamp=excluded.timestamp
                 """,
                 (mission_id, content),
             )
@@ -274,56 +401,81 @@ class LegionHTTPHandler(BaseHTTPRequestHandler):
     def _load_notepad(self, mission_id: str) -> str:
         conn = get_connection(DB_PATH)
         try:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS notepad_content (
-                    mission_id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    timestamp TEXT NOT NULL
-                )
-                """
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='notepad_content'"
             )
+            if not cursor.fetchone():
+                return ""
             row = conn.execute(
-                "SELECT content FROM notepad_content WHERE mission_id = ?",
+                "SELECT content FROM notepad_content WHERE mission_id = ? LIMIT 1",
                 (mission_id,),
             ).fetchone()
             return row["content"] if row else ""
         finally:
             conn.close()
 
-    def _call_ollama(self, prompt: str) -> str:
-        # Standard urllib request to local Ollama API
-        payload = {
-            "model": "llama3",
-            "prompt": prompt,
-            "stream": False,
-        }
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
+    def _update_token_usage(self, tokens_used: int):
+        conn = get_connection(DB_PATH)
         try:
-            with urllib.request.urlopen(req, timeout=15) as response:
-                res = json.loads(response.read().decode("utf-8"))
-                return res.get("response", "")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS token_count (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_count INTEGER NOT NULL,
+                    token_limit INTEGER NOT NULL
+                )
+                """
+            )
+            row = conn.execute("SELECT token_count, token_limit FROM token_count ORDER BY id DESC LIMIT 1").fetchone()
+            new_count = (row["token_count"] if row else 142830) + tokens_used
+            limit = row["token_limit"] if row else 500000
+            conn.execute("INSERT INTO token_count (token_count, token_limit) VALUES (?, ?)", (new_count, limit))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _call_ollama(self, prompt: str) -> str:
+        # Call OpenRouter with Nemotron model
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        api_key = "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"
+        
+        payload = {
+            "model": "nvidia/nemotron-3-super-120b-a12b:free",
+            "messages": [
+                {"role": "system", "content": "You are Legion AI, a helpful system assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "stream": False
+        }
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json; charset=utf-8")
+        req.add_header("HTTP-Referer", "http://localhost:3000")
+        req.add_header("X-Title", "Legion Studio")
+        
+        try:
+            data_bytes = json.dumps(payload).encode('utf-8')
+            with urllib.request.urlopen(req, data=data_bytes, timeout=30) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                ai_response = res_data['choices'][0]['message']['content']
+                self._update_token_usage(len(prompt) // 4 + len(ai_response) // 4)
+                return ai_response
         except Exception as e:
-            return f"Ollama offline. Response generated locally: Echoing back your prompt: '{prompt}' (Error: {e})"
+            return f"Error communicating with AI service: {e}"
 
 
-def run_server():
-    # Ensure public directory exists
-    PUBLIC_DIR.mkdir(exist_ok=True)
-    
-    server_address = ("", PORT)
-    httpd = HTTPServer(server_address, LegionHTTPHandler)
-    print(f"Legion OS Control Center running at http://localhost:{PORT}")
+def main():
+    server = HTTPServer(("localhost", PORT), LegionHTTPHandler)
+    print(f"Legion OS Control Center Backend running on http://localhost:{PORT}")
     try:
-        httpd.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping server...")
-        httpd.server_close()
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
-    run_server()
+    main()

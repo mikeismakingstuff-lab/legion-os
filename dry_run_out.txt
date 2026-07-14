@@ -1,0 +1,36 @@
+Loading workbook: RadioStation_ShishiOdoshi.xlsx
+Scanning rows and matching files in: E:\RadioStation
+
+==================================================
+RENAME SUMMARY
+==================================================
+Total entries processed: 25297
+Ready to rename:        4036
+No change required:     554
+Missing metadata:       3768
+Files not found:        16939
+==================================================
+
+[DRY-RUN] Showing first 20 proposed changes:
+  Row 2: 'A' 200 (Remastered 2004).mp3 -> Deep Purple - A' 200.mp3 (PENDING)
+  Row 3: 'Let 'Em In' - PaulMcCartney.com Track of the Week.mp3 -> PAUL McCARTNEY - PaulMcCartney.com Track of the Week.mp3 (PENDING)
+  Row 4: 'Listen To What The Man Said' - PaulMcCartney.com Track of the Week.mp3 -> PAUL McCARTNEY - PaulMcCartney.com Track of the Week (1).mp3 (CONFLICT RESOLVED)
+  Row 5: 'Magic Stick' by 50 Cent and Lil Kim (In Australia) ｜ Live Performance ｜ 50 Cent Music.mp3 -> 50 Cent - Magic Stick.mp3 (PENDING)
+  Row 6: 'With A Little Luck' - PaulMcCartney.com Track of the Week.mp3 -> PAUL McCARTNEY - PaulMcCartney.com Track of the Week (2).mp3 (CONFLICT RESOLVED)
+  Row 7: (20) Listen To What The Man Said.mp3 -> Paul McCartney (Wings) - Listen To What The Man Said.mp3 (PENDING)
+  Row 8: (Just Like) Starting Over (Ultimate Mix).mp3 -> John Lennon - (Just Like) Starting Over.mp3 (PENDING)
+  Row 9: (Patti) LaBelle - Lady Marmalade (1975) HD 0815007.mp3 -> (Patti) LaBelle - Lady Marmalade (1975) HD.mp3 (PENDING)
+  Row 10: (You're) Having My Baby - Paul Anka and Odia Coates.mp3 -> Paul Anka and Odia Coates - (You're) Having My Baby.mp3 (PENDING)
+  Row 11: -  - laylaltamelloo - Olen tässä  - Treblo.mp3 -> laylaltamelloo - Olen tässä - Treblo.mp3 (PENDING)
+  Row 12: -  - MichaЙl Ghelfi - Roll20-Compatible Patreon Exclusive - Amplified Haunted House.mp3 -> MichaЙl Ghelfi - Roll20-Compatible Patreon Exclusive - Amplified Haunted House.mp3 (PENDING)
+  Row 13: -  - MichaЙl Ghelfi - Roll20-Compatible Patreon Exclusive - Haunted Mansion Cellar.mp3 -> MichaЙl Ghelfi - Roll20-Compatible Patreon Exclusive - Haunted Mansion Cellar.mp3 (PENDING)
+  Row 14: - Alan Jackson - Don’t Rock the Jukebox.flac -> Alan Jackson - Don’t Rock the Jukebox.flac (PENDING)
+  Row 15: - François Cousineau - Psychedelic Party.mp3 -> François Cousineau - Psychedelic Party.mp3 (PENDING)
+  Row 16: - Larry Page Ork. - Fly (Volaré).mp3 -> Larry Page Ork. - Fly.mp3 (PENDING)
+  Row 17: - Mark of Amber - 'Richard'- Greets Geneviève (English).mp3 -> Mark of Amber - Richard'- Greets Geneviève.mp3 (PENDING)
+  Row 18: - Mark of Amber - 'Richard'- Greets Geneviève (French).mp3 -> Mark of Amber - Richard'- Greets Geneviève (1).mp3 (CONFLICT RESOLVED)
+  Row 19: - Mark of Amber - 2nd Dream- Étienne the soldier.mp3 -> Mark of Amber - 2nd Dream- Étienne the soldier.mp3 (PENDING)
+  Row 20: - Mark of Amber - 3rd Dream- Étienne the lover.mp3 -> Mark of Amber - 3rd Dream- Étienne the lover.mp3 (PENDING)
+  Row 21: - Mark of Amber - 4th Dream- Étienne in his coffin.mp3 -> Mark of Amber - 4th Dream- Étienne in his coffin.mp3 (PENDING)
+
+[DRY-RUN] To execute these 4036 renames and update tags, run with --commit.

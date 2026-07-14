@@ -15,7 +15,18 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from headroom import HeadroomCompressor
+# pyrefly: ignore [missing-import]
+try:
+    # pyrefly: ignore [missing-import]
+    from headroom import HeadroomCompressor
+except ImportError:
+    # Fallback dummy compressor if headroom is not installed
+    class HeadroomCompressor:
+        def compress(self, text: str) -> str:
+            return text
+        def decompress(self, text: str) -> str:
+            return text
+
 from src.db import get_connection
 
 

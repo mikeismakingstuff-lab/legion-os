@@ -1,24 +1,40 @@
 // public/scripts.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    // DOM Elements
+    console.log("scripts.js: DOMContentLoaded triggered");
+
+    // DOM Elements - Telemetry
     const cpuFill = document.getElementById('cpu-fill');
     const cpuVal = document.getElementById('cpu-val');
     const ramFill = document.getElementById('ram-fill');
     const ramVal = document.getElementById('ram-val');
     const latencyCanvas = document.getElementById('latency-canvas');
-    const tokenCountEl = document.getElementById('token-count');
-    const tokenLimitEl = document.getElementById('token-limit');
-    const tokenProgress = document.getElementById('token-progress');
-    const fileTreeEl = document.getElementById('file-tree');
-    const previewContainer = document.getElementById('preview-container');
-    const chatMessages = document.getElementById('chat-messages');
-    const chatInput = document.getElementById('chat-input');
-    const chatSendBtn = document.getElementById('chat-send-btn');
-    const notepadTextarea = document.getElementById('notepad-textarea');
+    const latencyVal = document.getElementById('latency-val');
+    const cpuTemp = document.getElementById('cpu-temp');
+    const ramTemp = document.getElementById('ram-temp');
+    const diskTemp = document.getElementById('disk-temp');
 
-    // Latency sparkline history
-    const latencyHistory = Array(10).fill(42);
+    // DOM Elements - File Explorer
+    const fileTreeEl = document.getElementById('file-tree');
+    const previewContent = document.getElementById('preview-content');
+
+    // DOM Elements - Chat
+    const nmt3sInput = document.getElementById('nmt3s-input');
+    const nmt3sSend = document.getElementById('nmt3s-send');
+    const nmt3sLog = document.getElementById('nmt3s-log');
+
+    const combinedInput = document.getElementById('combined-input');
+    const combinedSend = document.getElementById('combined-send');
+    const combinedLog = document.getElementById('combined-log');
+
+    const agvl1Input = document.getElementById('agvl1-input');
+    const agvl1Send = document.getElementById('agvl1-send');
+    const agvl1Log = document.getElementById('agvl1-log');
+
+    // State
+    const openFolders = new Set();
+    let activeFilePath = null;
+    const latencyHistory = Array(20).fill(42);
 
     // ──────────────────────────────────────────────────────────────────────────
     // Telemetry Polling
@@ -27,46 +43,47 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/telemetry')
             .then(res => res.json())
             .then(data => {
-                // Update CPU Gauge
                 updateGauge(cpuFill, cpuVal, data.cpu);
-                // Update RAM Gauge
                 updateGauge(ramFill, ramVal, data.ram);
-                // Update Latency Sparkline
                 updateLatency(data.latency);
-                // Update Token Monitor
-                updateTokenMonitor(data.token_count, data.token_limit);
+
+                // Simulate temps based on CPU/RAM load
+                cpuTemp.textContent = (30 + (data.cpu * 0.2)).toFixed(2) + '°C';
+                ramTemp.textContent = (35 + (data.ram * 0.1)).toFixed(2) + '°C';
+                diskTemp.textContent = (38 + (Math.random() * 2)).toFixed(2) + '°C';
             })
             .catch(err => console.error('Telemetry polling error:', err));
     }
 
     function updateGauge(fillEl, valEl, percent) {
-        // SVG dasharray circumference is 100
-        fillEl.setAttribute('stroke-dasharray', `${percent}, 100`);
-        valEl.textContent = `${percent}%`;
+        if (fillEl && valEl) {
+            fillEl.setAttribute('stroke-dasharray', `${percent}, 100`);
+            valEl.textContent = `${Math.round(percent)}%`;
+        }
     }
 
     function updateLatency(newLatency) {
+        if (latencyVal) latencyVal.textContent = `${newLatency}ms`;
         latencyHistory.push(newLatency);
-        if (latencyHistory.length > 10) {
+        if (latencyHistory.length > 20) {
             latencyHistory.shift();
         }
-        drawSparkline(latencyCanvas, latencyHistory);
+        if (latencyCanvas) drawSparkline(latencyCanvas, latencyHistory);
     }
 
     function drawSparkline(canvas, data) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        ctx.strokeStyle = '#00d2ff';
+        ctx.strokeStyle = '#c9425a'; // Crimson for network line
         ctx.lineWidth = 1.5;
         ctx.beginPath();
 
         const step = canvas.width / (data.length - 1);
-        const max = 100; // Max expected latency scale
+        const max = 100;
 
         data.forEach((val, index) => {
             const x = index * step;
-            // Invert Y since canvas 0,0 is top-left
             const y = canvas.height - (val / max) * canvas.height;
             if (index === 0) {
                 ctx.moveTo(x, y);
@@ -75,16 +92,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         ctx.stroke();
+
+        // Fill under line
+        ctx.lineTo(canvas.width, canvas.height);
+        ctx.lineTo(0, canvas.height);
+        ctx.fillStyle = 'rgba(201, 66, 90, 0.2)';
+        ctx.fill();
     }
 
-    function updateTokenMonitor(count, limit) {
-        tokenCountEl.textContent = count.toLocaleString();
-        tokenLimitEl.textContent = limit.toLocaleString();
-        const percent = Math.min((count / limit) * 100, 100);
-        tokenProgress.style.width = `${percent}%`;
-    }
-
-    // Start polling every 2 seconds
     pollTelemetry();
     setInterval(pollTelemetry, 2000);
 
@@ -95,45 +110,52 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/files')
             .then(res => res.json())
             .then(data => {
-                fileTreeEl.innerHTML = '';
-                renderNode(data, fileTreeEl);
+                if (fileTreeEl) {
+                    fileTreeEl.innerHTML = '';
+                    renderNode(data, fileTreeEl, '');
+                }
             })
             .catch(err => {
-                console.error('File tree load error:', err);
-                fileTreeEl.innerHTML = '<div class="tree-error">Failed to load workspace.</div>';
+                if (fileTreeEl) fileTreeEl.innerHTML = '<div class="tree-error">Failed to load workspace.</div>';
             });
     }
 
-    function renderNode(node, parentEl) {
+    function renderNode(node, parentEl, currentPath = '', depth = 0) {
+        const nodePath = currentPath ? `${currentPath}/${node.name}` : node.name;
+        const indentClass = depth > 0 ? `indent${Math.min(depth, 3)}` : '';
+
         if (node.type === 'directory') {
             const folderDiv = document.createElement('div');
-            folderDiv.className = 'tree-folder';
-
-            const header = document.createElement('div');
-            header.className = 'folder-header';
-            header.innerHTML = `<span class="folder-icon"></span> <span class="folder-name">${node.name}</span>`;
+            folderDiv.className = `tree-item ${indentClass}`;
+            folderDiv.innerHTML = `📁 ${node.name}`;
 
             const childrenContainer = document.createElement('div');
-            childrenContainer.className = 'folder-children';
+            childrenContainer.style.display = openFolders.has(nodePath) || currentPath === '' ? 'block' : 'none';
 
-            header.addEventListener('click', () => {
-                header.classList.toggle('open');
+            if (currentPath === '') openFolders.add(nodePath);
+
+            folderDiv.addEventListener('click', () => {
+                const isOpen = childrenContainer.style.display === 'block';
+                childrenContainer.style.display = isOpen ? 'none' : 'block';
+                if (isOpen) openFolders.delete(nodePath);
+                else openFolders.add(nodePath);
             });
 
-            folderDiv.appendChild(header);
-            folderDiv.appendChild(childrenContainer);
             parentEl.appendChild(folderDiv);
+            parentEl.appendChild(childrenContainer);
 
-            node.children.forEach(child => renderNode(child, childrenContainer));
+            node.children.forEach(child => renderNode(child, childrenContainer, nodePath, depth + 1));
         } else {
             const fileDiv = document.createElement('div');
-            fileDiv.className = 'file-item';
-            fileDiv.dataset.path = node.path;
-            fileDiv.innerHTML = `<span class="file-icon"></span> <span class="file-name">${node.name}</span>`;
+            fileDiv.className = `tree-item ${indentClass}`;
+            fileDiv.innerHTML = `📄 ${node.name}`;
+
+            if (node.path === activeFilePath) fileDiv.classList.add('active');
 
             fileDiv.addEventListener('click', () => {
-                document.querySelectorAll('.file-item').forEach(item => item.classList.remove('active'));
+                document.querySelectorAll('.tree-item').forEach(item => item.classList.remove('active'));
                 fileDiv.classList.add('active');
+                activeFilePath = node.path;
                 fetchPreview(node.path);
             });
 
@@ -142,7 +164,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchPreview(filePath) {
-        previewContainer.innerHTML = '<div class="preview-placeholder">Loading preview...</div>';
+        if (!previewContent) return;
+        previewContent.innerHTML = '<div class="preview-placeholder">Loading preview...</div>';
 
         fetch('/api/preview', {
             method: 'POST',
@@ -154,88 +177,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 return res.json();
             })
             .then(data => {
-                renderPreview(data.name, data.content);
+                previewContent.textContent = data.content;
             })
             .catch(err => {
-                previewContainer.innerHTML = `<div class="preview-error">Error: ${err.message}</div>`;
+                previewContent.innerHTML = `<div style="color:var(--crimson)">Error: ${err.message}</div>`;
             });
-    }
-
-    function renderPreview(filename, content) {
-        previewContainer.innerHTML = '';
-
-        const header = document.createElement('div');
-        header.className = 'preview-header';
-        header.textContent = filename;
-        previewContainer.appendChild(header);
-
-        const body = document.createElement('div');
-        body.className = 'preview-body';
-
-        if (filename.endsWith('.xlsx')) {
-            // Render spreadsheet as a clean table
-            body.appendChild(parseXlsxMock(content));
-        } else if (filename.endsWith('.docx')) {
-            // Render docx preview layout
-            body.innerHTML = `<div class="docx-preview">${content}</div>`;
-        } else {
-            // Default plain text
-            body.textContent = content;
-        }
-
-        previewContainer.appendChild(body);
-    }
-
-    function parseXlsxMock(content) {
-        // Basic parser for mock xlsx representation
-        const table = document.createElement('table');
-        table.className = 'preview-table';
-
-        const lines = content.split('\n');
-        lines.forEach((line, index) => {
-            if (!line.trim()) return;
-            const row = document.createElement('tr');
-            const cols = line.split('\t'); // Tab-separated mock
-
-            cols.forEach(col => {
-                const cell = document.createElement(index === 0 ? 'th' : 'td');
-                cell.textContent = col;
-                row.appendChild(cell);
-            });
-            table.appendChild(row);
-        });
-        return table;
     }
 
     loadFileTree();
+    setInterval(loadFileTree, 5000);
 
     // ──────────────────────────────────────────────────────────────────────────
-    // AI Chat Core
+    // Chat Handlers
     // ──────────────────────────────────────────────────────────────────────────
-    function appendMessage(sender, text, type) {
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${type}`;
-        msgDiv.innerHTML = `
-            <div class="message-sender">${sender}</div>
-            <div class="message-text">${text}</div>
-        `;
-        chatMessages.appendChild(msgDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+    function getTimestamp() {
+        const now = new Date();
+        return `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}]`;
     }
 
-    function sendChatMessage() {
-        const text = chatInput.value.trim();
+    function appendLog(logEl, text, isError = false) {
+        if (!logEl) return;
+        const div = document.createElement('div');
+        if (isError) div.style.color = 'var(--crimson)';
+        div.innerHTML = `<span class="ts">${getTimestamp()}</span> ${text}`;
+        logEl.appendChild(div);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // NMT3S (Ollama)
+    function sendNmt3s() {
+        if (!nmt3sInput || !nmt3sLog) return;
+        const text = nmt3sInput.value.trim();
         if (!text) return;
 
-        appendMessage('User', text, 'user');
-        chatInput.value = '';
-
-        // Show typing indicator
-        const typingDiv = document.createElement('div');
-        typingDiv.className = 'message system typing';
-        typingDiv.innerHTML = `<div class="message-sender">Legion AI</div><div class="message-text">Thinking...</div>`;
-        chatMessages.appendChild(typingDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        appendLog(nmt3sLog, `> ${text}`);
+        nmt3sInput.value = '';
 
         fetch('/api/chat', {
             method: 'POST',
@@ -243,91 +219,189 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ message: text })
         })
             .then(res => res.json())
-            .then(data => {
-                typingDiv.remove();
-                appendMessage('Legion AI', data.response, 'system');
-            })
-            .catch(err => {
-                typingDiv.remove();
-                appendMessage('System', `Error: ${err.message}`, 'system');
-            });
+            .then(data => appendLog(nmt3sLog, data.response))
+            .catch(err => appendLog(nmt3sLog, `Error: ${err.message}`, true));
     }
 
-    chatSendBtn.addEventListener('click', sendChatMessage);
-    chatInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') sendChatMessage();
-    });
+    if (nmt3sSend) nmt3sSend.addEventListener('click', sendNmt3s);
+    if (nmt3sInput) nmt3sInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendNmt3s(); });
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Notepad Scratchpad (Debounced Auto-Save)
-    // ──────────────────────────────────────────────────────────────────────────
-    let saveTimeout;
+    // AGVL1 (Antigravity)
+    function sendAgvl1() {
+        if (!agvl1Input || !agvl1Log) return;
+        const text = agvl1Input.value.trim();
+        if (!text) return;
 
-    function loadNotepad() {
-        fetch('/api/notepad', {
+        appendLog(agvl1Log, `> ${text}`);
+        agvl1Input.value = '';
+
+        fetch('/api/antigravity', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'load' })
+            body: JSON.stringify({ message: text })
+        })
+            .then(res => res.json())
+            .then(data => appendLog(agvl1Log, data.response))
+            .catch(err => appendLog(agvl1Log, `Error: ${err.message}`, true));
+    }
+
+    if (agvl1Send) agvl1Send.addEventListener('click', sendAgvl1);
+    if (agvl1Input) agvl1Input.addEventListener('keydown', e => { if (e.key === 'Enter') sendAgvl1(); });
+
+    // Combined Session (Committee Protocol)
+    let committeePollingInterval = null;
+
+    function pollCommittee() {
+        fetch('/api/deliberation')
+            .then(res => res.json())
+            .then(data => {
+                if (!combinedLog) return;
+
+                let liveDiv = document.getElementById('committee-live-content');
+                if (!liveDiv) {
+                    liveDiv = document.createElement('div');
+                    liveDiv.id = 'committee-live-content';
+                    liveDiv.style.whiteSpace = 'pre-wrap';
+                    liveDiv.style.marginTop = '10px';
+                    combinedLog.appendChild(liveDiv);
+                }
+
+                const isScrolledToBottom = combinedLog.scrollHeight - combinedLog.scrollTop - combinedLog.clientHeight < 20;
+
+                liveDiv.textContent = data.content;
+
+                if (isScrolledToBottom) {
+                    combinedLog.scrollTop = combinedLog.scrollHeight;
+                }
+
+                if (data.content.includes('Final Verified Plan') || data.content.includes('Error running committee')) {
+                    clearInterval(committeePollingInterval);
+                    committeePollingInterval = null;
+                }
+            })
+            .catch(err => console.error('Polling error:', err));
+    }
+
+    function sendCombined() {
+        if (!combinedInput || !combinedLog) return;
+        const text = combinedInput.value.trim();
+        if (!text) return;
+
+        const existingLive = document.getElementById('committee-live-content');
+        if (existingLive) existingLive.remove();
+
+        appendLog(combinedLog, `> ${text}`);
+        combinedInput.value = '';
+
+        fetch('/api/committee', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
         })
             .then(res => res.json())
             .then(data => {
-                notepadTextarea.value = data.content || '';
+                if (data.status === 'started') {
+                    if (committeePollingInterval) clearInterval(committeePollingInterval);
+                    committeePollingInterval = setInterval(pollCommittee, 1000);
+                }
             })
-            .catch(err => console.error('Notepad load error:', err));
+            .catch(err => appendLog(combinedLog, `Error: ${err.message}`, true));
     }
 
-    function saveNotepad() {
-        const content = notepadTextarea.value;
-        fetch('/api/notepad', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'save', content: content })
-        })
-            .catch(err => console.error('Notepad save error:', err));
-    }
+    if (combinedSend) combinedSend.addEventListener('click', sendCombined);
+    if (combinedInput) combinedInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendCombined(); });
 
-    notepadTextarea.addEventListener('input', () => {
-        clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(saveNotepad, 1000); // Debounce 1s
-    });
+    // ──────────────────────────────────────────────────────────────────────────
+    // Resizable Frames Logic
+    // ──────────────────────────────────────────────────────────────────────────
+    const resizers = document.querySelectorAll('.resizer');
+    let isDragging = false;
+    let currentResizer = null;
+    let startX, startY;
+    let startPrevSize, startNextSize;
 
-    // Notepad Formatting Toolbar
-    document.querySelectorAll('.toolbar-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const format = btn.dataset.format;
-            const start = notepadTextarea.selectionStart;
-            const end = notepadTextarea.selectionEnd;
-            const text = notepadTextarea.value;
-            const selectedText = text.substring(start, end);
+    resizers.forEach(resizer => {
+        resizer.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            currentResizer = resizer;
+            resizer.classList.add('dragging');
 
-            let replacement = '';
-            switch (format) {
-                case 'bold':
-                    replacement = `**${selectedText || 'text'}**`;
-                    break;
-                case 'italic':
-                    replacement = `*${selectedText || 'text'}*`;
-                    break;
-                case 'link':
-                    replacement = `[${selectedText || 'link text'}](url)`;
-                    break;
-                case 'code':
-                    replacement = `\`${selectedText || 'code'}\``;
-                    break;
-                case 'list':
-                    replacement = `\n- ${selectedText || 'item'}`;
-                    break;
-            }
+            startX = e.clientX;
+            startY = e.clientY;
 
-            notepadTextarea.value = text.substring(0, start) + replacement + text.substring(end);
-            notepadTextarea.focus();
-            notepadTextarea.selectionStart = start + replacement.length;
-            notepadTextarea.selectionEnd = start + replacement.length;
+            const targetId = resizer.dataset.target;
+            const targetEl = document.getElementById(targetId);
 
-            // Trigger save
-            saveNotepad();
+            // Get current grid template
+            const computedStyle = window.getComputedStyle(targetEl);
+            const isCol = resizer.classList.contains('resizer-col');
+
+            const tracks = isCol ? computedStyle.gridTemplateColumns.split(' ') : computedStyle.gridTemplateRows.split(' ');
+
+            const index = parseInt(resizer.dataset.index);
+            startPrevSize = parseFloat(tracks[index - 1]);
+            startNextSize = parseFloat(tracks[index + 1]);
+
+            document.body.style.cursor = isCol ? 'col-resize' : 'row-resize';
+            e.preventDefault(); // Prevent text selection
         });
     });
 
-    loadNotepad();
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging || !currentResizer) return;
+
+        const isCol = currentResizer.classList.contains('resizer-col');
+        const delta = isCol ? e.clientX - startX : e.clientY - startY;
+
+        const targetId = currentResizer.dataset.target;
+        const index = parseInt(currentResizer.dataset.index);
+
+        // Calculate new sizes in pixels
+        let newPrevSize = startPrevSize + delta;
+        let newNextSize = startNextSize - delta;
+
+        // Minimum size constraint (e.g., 100px)
+        if (newPrevSize < 100) {
+            newNextSize -= (100 - newPrevSize);
+            newPrevSize = 100;
+        }
+        if (newNextSize < 100) {
+            newPrevSize -= (100 - newNextSize);
+            newNextSize = 100;
+        }
+
+        // Apply via CSS variables
+        if (targetId === 'main-grid') {
+            if (index === 1) {
+                document.documentElement.style.setProperty('--col-left', `${newPrevSize}px`);
+                document.documentElement.style.setProperty('--col-center', `${newNextSize}px`);
+            } else if (index === 3) {
+                document.documentElement.style.setProperty('--col-center', `${newPrevSize}px`);
+                document.documentElement.style.setProperty('--col-right', `${newNextSize}px`);
+            }
+        } else if (targetId === 'col-left') {
+            if (index === 1) {
+                document.documentElement.style.setProperty('--row-left-top', `${newPrevSize}px`);
+                document.documentElement.style.setProperty('--row-left-mid', `${newNextSize}px`);
+            } else if (index === 3) {
+                document.documentElement.style.setProperty('--row-left-mid', `${newPrevSize}px`);
+                document.documentElement.style.setProperty('--row-left-bottom', `${newNextSize}px`);
+            }
+        } else if (targetId === 'col-right') {
+            if (index === 1) {
+                document.documentElement.style.setProperty('--row-right-top', `${newPrevSize}px`);
+                document.documentElement.style.setProperty('--row-right-bottom', `${newNextSize}px`);
+            }
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            if (currentResizer) currentResizer.classList.remove('dragging');
+            currentResizer = null;
+            document.body.style.cursor = 'default';
+        }
+    });
+
 });

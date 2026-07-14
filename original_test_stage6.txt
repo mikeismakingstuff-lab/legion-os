@@ -80,45 +80,9 @@ class TestOutputValidation:
             "mission_id": "m1",
             "deliberation_id": "d1",
             "recommendations": [
-                {
-                    "rank": "1",
-                    "slot": "1A",
-                    "unit_id": "u1",
-                    "rationale_facts": {
-                        "rank": "1",
-                        "unit_id": "u1",
-                        "top_lens": "creative_director",
-                        "top_lens_score": 0.8,
-                        "aggregate_score": 0.85,
-                    },
-                    "confidence": 0.85,
-                },
-                {
-                    "rank": "2",
-                    "slot": "2A",
-                    "unit_id": "u2",
-                    "rationale_facts": {
-                        "rank": "2",
-                        "unit_id": "u2",
-                        "top_lens": "financial_director",
-                        "top_lens_score": 0.7,
-                        "aggregate_score": 0.75,
-                    },
-                    "confidence": 0.75,
-                },
-                {
-                    "rank": "3",
-                    "slot": "3A",
-                    "unit_id": "u3",
-                    "rationale_facts": {
-                        "rank": "3",
-                        "unit_id": "u3",
-                        "top_lens": "technical_director",
-                        "top_lens_score": 0.6,
-                        "aggregate_score": 0.65,
-                    },
-                    "confidence": 0.65,
-                },
+                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
+                {"rank": 2, "slot": "2A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
+                {"rank": 3, "slot": "3A", "unit_id": "u3", "rationale": "fine", "confidence": 0.7},
             ]
         }
         err = _validate_deliberation_output(output)
@@ -129,32 +93,8 @@ class TestOutputValidation:
             "mission_id": "m1",
             "deliberation_id": "d1",
             "recommendations": [
-                {
-                    "rank": "1",
-                    "slot": "1A",
-                    "unit_id": "u1",
-                    "rationale_facts": {
-                        "rank": "1",
-                        "unit_id": "u1",
-                        "top_lens": "creative_director",
-                        "top_lens_score": 0.8,
-                        "aggregate_score": 0.85,
-                    },
-                    "confidence": 0.85,
-                },
-                {
-                    "rank": "2",
-                    "slot": "2A",
-                    "unit_id": "u2",
-                    "rationale_facts": {
-                        "rank": "2",
-                        "unit_id": "u2",
-                        "top_lens": "financial_director",
-                        "top_lens_score": 0.7,
-                        "aggregate_score": 0.75,
-                    },
-                    "confidence": 0.75,
-                },
+                {"rank": 1, "slot": "1A", "unit_id": "u1", "rationale": "good", "confidence": 0.9},
+                {"rank": 2, "slot": "2A", "unit_id": "u2", "rationale": "ok", "confidence": 0.8},
             ]
         }
         err = _validate_deliberation_output(output)
@@ -178,20 +118,13 @@ class TestPipelineHalt:
             },
             db_path=tmp_db,
         )
-        # Insert invalid deliberation results into DB
-        conn = sqlite3.connect(str(tmp_db))
-        conn.execute(
-            """
-            INSERT INTO deliberation_results (deliberation_id, mission_id, recommendations, flags)
-            VALUES (?, ?, ?, ?)
-            """,
-            ("d1", mission["mission_id"], json.dumps([]), json.dumps([])),
-        )
-        conn.commit()
-        conn.close()
-
+        invalid_output = {
+            "mission_id": mission["mission_id"],
+            "deliberation_id": "d1",
+            "recommendations": []
+        }
         with pytest.raises(ValueError, match="Deliberation output validation failed"):
-            generate_pipeline_output(mission["mission_id"], db_path=tmp_db)
+            generate_pipeline_output(invalid_output, db_path=tmp_db)
 
         # Verify pipeline_halt is logged
         conn = sqlite3.connect(str(tmp_db))
@@ -218,7 +151,7 @@ class TestEndToEndOutput:
             "Contains audience, reach, or platform-specific signal for modern platforms."
         )
         mission, delib_out = _setup_mission_with_deliberation(tmp_db, raw_content)
-        res = generate_pipeline_output(mission["mission_id"], db_path=tmp_db)
+        res = generate_pipeline_output(delib_out, db_path=tmp_db)
 
         assert res["mission_id"] == mission["mission_id"]
         assert "slots" in res
@@ -228,7 +161,7 @@ class TestEndToEndOutput:
 
         # Verify content is populated
         assert res["slots"]["1A"]["content"] is not None
-        assert res["slots"]["1A"]["rationale_facts"] is not None
+        assert res["slots"]["1A"]["rationale"] is not None
 
         # Verify pipeline summary metrics
         summary = res["pipeline_summary"]

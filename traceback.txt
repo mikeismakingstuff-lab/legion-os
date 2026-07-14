@@ -1,0 +1,47 @@
+test_commit_and_rollback ___________________________
+
+setup_test_env = (WindowsPath('C:/Users/micha/AppData/Local/Temp/pytest-of-micha/pytest-62/test_commit_and_rollback0/library.xlsx'), WindowsPath('C:/Users/micha/AppData/Local/Temp/pytest-of-micha/pytest-62/test_commit_and_rollback0/RadioStation'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C1DBA729E0>
+tmp_path = WindowsPath('C:/Users/micha/AppData/Local/Temp/pytest-of-micha/pytest-62/test_commit_and_rollback0')
+
+    def test_commit_and_rollback(setup_test_env, monkeypatch, tmp_path):
+        xlsx_path, audio_dir = setup_test_env
+    
+        # Run main in commit mode
+        import sys
+        monkeypatch.setattr(sys, "argv", ["rename_music.py", str(xlsx_path), str(audio_dir), "--commit"])
+    
+        # Mock update_tags
+        monkeypatch.setattr("rename_music.update_tags", lambda p, a, t: (True, None))
+    
+        # Run main
+        from rename_music import main
+        main()
+    
+        # Verify files WERE renamed
+        assert not (audio_dir / "old_song_1.mp3").exists()
+        assert (audio_dir / "Artist One - Title One.mp3").exists()
+        assert (audio_dir / "Artist Two - Title Two.flac").exists()
+    
+        # Verify conflict resolution
+        assert (audio_dir / "Artist Three - Title Three.mp3").exists()
+        assert (audio_dir / "Artist Three - Title Three (1).mp3").exists()
+    
+        # Find the transaction log
+        logs = list(Path(".").glob("rename_transaction_*.json"))
+        assert len(logs) >= 1
+        log_path = logs[0]
+    
+        try:
+            # Run rollback
+            monkeypatch.setattr(sys, "argv", ["rename_music.py", "--rollback", str(log_path)])
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+>           assert excinfo.value.code == 0
+E           assert 1 == 0
+E            +  where 1 = SystemExit(1).code
+E            +    where SystemExit(1) = <ExceptionInfo SystemExit(1) tblen=2>.value
+
+tests\test_rename_music.py:152: AssertionError
+---------------------------- Captured stdout call -----------------------------
+Loading workbook: C:\\Users\\micha\\AppData\\Local\\Temp\\pytest-of-micha\\pytest-62\\test_commit_and_rollback0\\library.xlsx\nScanning rows and matching files in: C:\\Users\\micha\\AppData\\Local\\Temp\\pytest-of-micha\\pytest-62\\test_commit_and_rollback0\\RadioStation\n\n==================================================\nRENAME SUMMARY\n==================================================\nTotal entries processed: 4\nReady to rename:        4\nNo change required:     0\nMissing metadata:       0\nFiles not found:        0\n==================================================\n\nCommitting changes. Writing transaction log to: rename_transaction_20260707_060240.json\nProcessing Row 2: old_song_1.mp3 -> Artist One - Title One.mp3\n  [OK] Renamed successfully.\nProcessing Row 3: old_song_2.flac -> Artist Two - Title Two.flac\n  [OK] Renamed successfully.\nProcessing Row 4: conflict_song.mp3 -
