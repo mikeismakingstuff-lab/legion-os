@@ -14,6 +14,9 @@ OPENROUTER_API_KEY = "sk-or-v1-c76bc3cf5535c15a5eb58c9f96663b232ace0e8900f36b4aa
 
 # Leave the rest of the file completely as-is
 MODEL_BUILDER = "qwen/qwen-2.5-7b-instruct"  # Representing The Engineer
+MODEL_BUILDER_LOCAL = "qwen2.5:7b"           # Same model, served locally via Ollama/Antigravity — no API call, no cost
+USE_LOCAL_BUILDER = False                      # Flip to False to fall back to OpenRouter for the Builder side
+OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
 MODEL_CYNIC   = "nvidia/nemotron-3-super-120b-a12b:free"  # Legion Deliberation Partner
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -47,6 +50,49 @@ def update_token_usage(tokens_used: int):
         pass
     finally:
         conn.close()
+
+def call_local_ollama(model_name, system_prompt, user_content):
+    """Same request shape as call_openrouter, but hits your local Ollama/Antigravity
+    endpoint instead — no API key, no token cost, no network call leaving the machine."""
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        "temperature": 0.2,
+        "stream": False
+    }
+
+    req = urllib.request.Request(OLLAMA_URL)
+    req.add_header("Content-Type", "application/json; charset=utf-8")
+
+    try:
+        data_bytes = json.dumps(payload).encode('utf-8')
+        with urllib.request.urlopen(req, data=data_bytes, timeout=120) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            ai_response = res_data['choices'][0]['message']['content']
+            # Local calls cost no tokens against your OpenRouter budget — do not log to update_token_usage.
+            return ai_response
+
+    except urllib.error.URLError as url_err:
+        sys.stderr.write(
+            f"\n[LOCAL ERROR] Could not reach Ollama at {OLLAMA_URL}: {url_err}\n"
+            f"Is Ollama running, and is '{model_name}' pulled? Try: ollama list\n"
+        )
+        sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(f"\n[LOCAL ERROR] {e}\n")
+        sys.exit(1)
+
+def call_builder(system_prompt, user_content):
+    """Dispatcher: routes the Builder side to local Ollama or OpenRouter,
+    based on USE_LOCAL_BUILDER. Everything downstream calls this, not the
+    model-specific functions directly, so the switch stays in one place."""
+    if USE_LOCAL_BUILDER:
+        return call_local_ollama(MODEL_BUILDER_LOCAL, system_prompt, user_content)
+    return call_openrouter(MODEL_BUILDER, system_prompt, user_content)
 
 def call_openrouter(model_name, system_prompt, user_content):
     """Executes a clean, flat POST request to OpenRouter's API using strict HTTP packing."""
@@ -122,7 +168,7 @@ def main():
 
     # --- ROUND 1 ---
     print("\n[Round 1/3] Engineer proposing initial build steps...")
-    code_v1 = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, f"Specification:\n{original_spec}")
+    code_v1 = call_builder(SYSTEM_BUILDER, f"Specification:\n{original_spec}")
     write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n")
     print(f"  ✓ Engineer proposal v1 completed.")
 
@@ -134,7 +180,7 @@ def main():
     # --- ROUND 2 ---
     print("\n[Round 2/3] Engineer refining plan against critique v1...")
     builder_prompt_v2 = f"Original Spec:\n{original_spec}\n\nYour Previous Plan:\n{code_v1}\n\nResolve these 3 flaws immediately:\n{critique_v1}"
-    code_v2 = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, builder_prompt_v2)
+    code_v2 = call_builder(SYSTEM_BUILDER, builder_prompt_v2)
     write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n\n### Round 2 — Engineer Refined Plan\n\n{code_v2}\n")
     print(f"  ✓ Engineer proposal v2 completed.")
 
@@ -146,7 +192,7 @@ def main():
     # --- ROUND 3 (FINAL FIX) ---
     print("\n[Round 3/3] Engineer compiling final optimized plan...")
     builder_prompt_v3 = f"Original Spec:\n{original_spec}\n\nYour Current Plan:\n{code_v2}\n\nResolve these final flaws:\n{critique_v2}"
-    final_code = call_openrouter(MODEL_BUILDER, SYSTEM_BUILDER, builder_prompt_v3)
+    final_code = call_builder(SYSTEM_BUILDER, builder_prompt_v3)
     write_live_log(f"### Round 1 — Engineer Proposal\n\n{code_v1}\n\n### Round 1 — Legion Critique\n\n{critique_v1}\n\n### Round 2 — Engineer Refined Plan\n\n{code_v2}\n\n### Round 2 — Legion Critique\n\n{critique_v2}\n\n### Final Verified Plan\n\n{final_code}\n")
     print(f"  ✓ Final plan compilation complete.")
 
