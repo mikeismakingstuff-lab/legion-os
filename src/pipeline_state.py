@@ -51,6 +51,7 @@ class PipelineState(TypedDict):
     batch_promoted:        bool
     blast_radius_exceeded: bool   # True when retraction circuit breaker fires (>15%)
     arbitration_resolved:  bool   # True when arbitration node clears for continuation
+    pending_review_id:     Optional[str]  # manual_review_queue.review_id awaiting human action
     is_compressed:         bool   # True if Headroom compression was run on the batch
     compression_ratio:     float  # Average compression ratio for the batch
 
@@ -127,6 +128,7 @@ def make_initial_state(
         batch_promoted=False,
         blast_radius_exceeded=False,
         arbitration_resolved=False,
+        pending_review_id=None,
         is_compressed=False,
         compression_ratio=1.0,
     )

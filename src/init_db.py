@@ -175,7 +175,9 @@ CREATE TABLE IF NOT EXISTS manual_review_queue (
     loser_key                     TEXT NOT NULL,
     projected_blast_radius        REAL NOT NULL,
     affected_record_ids           TEXT NOT NULL, -- JSON list of record_ids
-    timestamp                     TEXT NOT NULL
+    timestamp                     TEXT NOT NULL,
+    status                        TEXT NOT NULL DEFAULT 'awaiting_human_review'
+                                     CHECK (status IN ('awaiting_human_review', 'approved', 'rejected'))
 );
 """
 
@@ -191,7 +193,20 @@ def init_database(db_path: Path | None = None) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
-        
+
+        # Migration: add manual_review_queue.status to databases created before
+        # this column existed. CREATE TABLE IF NOT EXISTS above is a no-op on an
+        # already-existing table, so this ALTER TABLE is what actually reaches
+        # pre-existing pipeline.db files. Safe to run repeatedly.
+        try:
+            conn.execute(
+                "ALTER TABLE manual_review_queue ADD COLUMN status TEXT "
+                "NOT NULL DEFAULT 'awaiting_human_review'"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
         # Create indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_chapter ON classified_records(chapter_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_assertion ON classified_records(assertion_key)")

@@ -23,22 +23,37 @@ E:\Legion
 │   ├── legion_graph.py     # Custom LegionStateMachine and node topology
 │   ├── compression_engine.py # Headroom context compression wrapper
 │   ├── web_server.py       # API server for the Control Center UI
-│   ├── stage0_mission.py   # Mission calibration logic
-│   ├── stage1_ingest.py    # Ingestion and Shishi-Odoshi accumulation
+│   ├── stage0_mission.py   # Mission calibration logic + SourceMapper (source_registry)
+│   ├── stage1_ingest.py    # Ingestion, Shishi-Odoshi accumulation, web scraping
 │   ├── stage2_parse.py     # Rule-based sentence splitting and classification
 │   ├── stage3_filter.py    # 4-rule noise and duplicate filtering
 │   ├── stage4_weigh.py     # Multi-lens scoring engine
-│   ├── stage5_deliberate.py # Recommendation and flag aggregation
+│   ├── stage5_deliberate.py # Deterministic top-3 selection (no external LLM calls)
 │   ├── stage6_output.py    # Output slot mapping and serialization
-│   └── retraction_engine.py # Retraction blast-radius calculation
+│   └── retraction_engine.py # Retraction blast-radius calculation & manual_review_queue
 ├── tests/                  # Pytest verification suite
 │   ├── test_stage1.py to test_stage6.py  # Stage-specific unit tests
 │   ├── test_retraction.py  # Retraction engine tests
-│   └── test_web_ingest.py  # Web scraping and ingestion tests
-├── pipeline.db             # Active SQLite database (created on first run)
+│   ├── test_web_ingest.py  # Web scraping and ingestion tests
+│   ├── test_phase1.py      # Config/schema/mission integrity tests
+│   └── test_source_mapper.py # SourceMapper matching logic tests
+├── music_tools/            # Music library tooling — separate concern from the core pipeline
+│   ├── clean_music.py
+│   ├── rename_music.py
+│   ├── test_rename_music.py
+│   └── RadioStation_ShishiOdoshi.xlsx
 ├── system_modes.json       # System configurations and thresholds
 └── config.json             # Global configuration parameters
 ```
+
+> **Note on `pipeline.db`:** despite appearing in earlier versions of this map,
+> the active database is **not** stored in this directory by default.
+> `src/db.py::_resolve_db_path()` resolves to
+> `~/Documents/ContentPipeline/pipeline.db` (i.e. `C:\Users\<you>\Documents\ContentPipeline\pipeline.db`
+> on Windows) unless the `COMMITTEE_OS_DATA_ROOT` environment variable is set.
+> Any `pipeline.db` seen sitting in `E:\Legion` itself was created by an
+> explicit `db_path` override (e.g. a script or test passing its own path) and
+> is not the file the pipeline reads from or writes to during a normal run.
 
 ---
 
@@ -117,6 +132,54 @@ All pipeline state and processed data are persisted in SQLite (`pipeline.db`) to
     *   `content` (TEXT NOT NULL): Markdown notepad content.
     *   `timestamp` (TEXT NOT NULL): Last saved timestamp.
 
+### Epistemic & Retraction Layer (Stage 3/4 Extension)
+These tables back the parts of Legion not covered by the original Committee OS
+spec: source auto-suggestion, contradiction resolution, and the human-gated
+circuit breaker on retractions. All five are created by `src/init_db.py` but
+were previously undocumented here.
+
+12. **`source_registry`** (Stage 0 — `SourceMapper`):
+    *   `source_id` (TEXT PRIMARY KEY).
+    *   `domain` (TEXT NOT NULL): One of the 14 modes.
+    *   `keyword` (TEXT NOT NULL): Mission-statement keyword to match, or `*` (wildcard fallback).
+    *   `url` (TEXT NOT NULL): Suggested source URL.
+    *   `priority` (INTEGER NOT NULL): Lower sorts first.
+    *   Note: `stage0_mission.py::SourceMapper.map_mission_to_sources()` reads this
+      table and is fully tested (`tests/test_source_mapper.py`), but as of this
+      writing is **not called from `legion_graph.py`** — it exists and works,
+      it just isn't wired into `node_ingest` yet.
+13. **`classified_records`** (Stage 3/4 — epistemic layer):
+    *   `record_id` (TEXT PRIMARY KEY).
+    *   `chapter_id` (TEXT NOT NULL).
+    *   `assertion_key` (TEXT NOT NULL): Groups records making the same claim.
+    *   `verdict` (TEXT NOT NULL): `pass` | `fail` | `flagged`.
+    *   `rubric_dependencies` (TEXT NOT NULL): JSON blob of evaluated criteria.
+    *   `confidence_score` (REAL NOT NULL, 0.0–1.0).
+    *   `supersedes_record_id` (TEXT REFERENCES `classified_records`): Set when a
+        retraction replaces this record.
+    *   `timestamp` (TEXT NOT NULL).
+14. **`record_dependencies`**:
+    *   `dependent_record_id`, `dependency_record_id` (both TEXT REFERENCES `classified_records`).
+    *   Composite primary key. Used by `retraction_engine.py::project_blast_radius()`
+        to compute how many downstream records a retraction would affect.
+15. **`quarantine_log`**:
+    *   `quarantine_id` (TEXT PRIMARY KEY).
+    *   `unit_id` (TEXT NOT NULL REFERENCES `parsed_units`).
+    *   `reason` (TEXT NOT NULL).
+    *   `timestamp` (TEXT NOT NULL).
+16. **`manual_review_queue`** (the retraction circuit breaker's human gate):
+    *   `review_id` (TEXT PRIMARY KEY).
+    *   `contested_key_a`, `contested_key_b`, `loser_key` (TEXT NOT NULL).
+    *   `projected_blast_radius` (REAL NOT NULL): Percentage of active records affected.
+    *   `affected_record_ids` (TEXT NOT NULL): JSON list.
+    *   `timestamp` (TEXT NOT NULL).
+    *   `status` (TEXT NOT NULL, default `'awaiting_human_review'`): one of
+        `awaiting_human_review` | `approved` | `rejected`. **This is the only
+        thing `node_arbitration` will accept as authorization to continue past
+        a blocked retraction.** No API call, subprocess exit code, or committee
+        opinion can set this value — only a human (or a future explicit approval
+        action) updating the row directly.
+
 ---
 
 ## 3. State Machine & Routing Passport
@@ -134,6 +197,7 @@ class PipelineState(TypedDict):
     batch_promoted:        bool   # True if pending batch was promoted to 'received'
     blast_radius_exceeded: bool   # True if retraction blast radius > 15%
     arbitration_resolved:  bool   # True if arbitration node clears continuation
+    pending_review_id:     Optional[str]  # manual_review_queue.review_id awaiting human action
     is_compressed:         bool   # True if Headroom compression was run
     compression_ratio:     float  # Average compression ratio for the batch
 ```
@@ -141,7 +205,7 @@ class PipelineState(TypedDict):
 ### Routing Logic
 *   **Ingest Promotion:** If `batch_promoted` is `True`, the router advances to `PARSE`. If `False` (still accumulating in shishi-odoshi mode), execution halts gracefully at `INGEST`.
 *   **Error Handling:** If `error_flag` is `True`, execution routes to the `arbitration` node for manual review or automated retries.
-*   **Retraction Circuit Breaker:** If a retraction is triggered, the `retraction_engine` calculates the blast radius. If it exceeds 15% of total parsed units, `blast_radius_exceeded` is set to `True`, halting execution for manual arbitration.
+*   **Retraction Circuit Breaker:** If a retraction is triggered, the `retraction_engine` calculates the blast radius. If it exceeds 15% of total parsed units, `blast_radius_exceeded` is set to `True`, halting execution for manual arbitration. **Arbitration only clears via a human setting `manual_review_queue.status` to `'approved'`** — an attached OpenRouter committee call (when `OPENROUTER_API_KEY` is set) is advisory only and cannot authorize continuation by itself.
 
 ---
 
@@ -188,3 +252,19 @@ The backend web server (`src/web_server.py`) exposes the following endpoints:
     *   *Request (Save):* `{"action": "save", "content": "markdown text", "mission_id": "optional-uuid"}`
     *   *Request (Load):* `{"action": "load", "mission_id": "optional-uuid"}`
     *   *Response:* `{"status": "success"}` or `{"content": "markdown text"}`
+*   **`GET /health`**
+    *   *Response:* Basic liveness check.
+*   **`GET /api/deliberation`**
+    *   *Response:* `{"content": "..."}` — tails `committee_live.txt`, the running output
+        of a `committee.py` subprocess. Unrelated to the Stage 5 `deliberation_results`
+        table despite the shared name — this is the Control Center's live feed for
+        the "Combined Session" panel, not pipeline deliberation output.
+*   **`POST /api/committee`**
+    *   *Request:* `{"message": "..."}`
+    *   *Effect:* Spawns `committee.py` as a background subprocess against the
+        message, on the burner OpenRouter key. No confirmation step — any typed
+        message in the "Combined Session" UI panel triggers this immediately.
+    *   *Response:* `{"status": "started"}`
+*   **`POST /api/antigravity`**
+    *   *Request:* `{"message": "..."}`
+    *   *Response:* `{"response": "..."}`

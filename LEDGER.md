@@ -1,5 +1,21 @@
 # Legion OS Project Ledger
 
+> **Staleness notice (2026-07-17):** This session moved/renamed several files
+> referenced below — `clean_music.py`, `rename_music.py`, `RadioStation_ShishiOdoshi.xlsx`,
+> and `test_rename_music.py` are now under `music_tools/`; `_committee_spec.md`,
+> `_headroom_spec.md`, `_ui_spec.md`, and `graph_evolution_spec.md` are renamed
+> to `spec_*.md`; `Architecture.txt` is now `ARCHITECTURE.md`; the root-level
+> `pipeline.db` and `rename_transaction_*.json` were quarantined to
+> `_pending_delete/`. Entries below still showing old paths were **not**
+> individually hand-corrected — doing that across 100+ entries risked
+> introducing new errors into the one document whose job is catching them.
+> The `node_arbitration`/`node_deliberate`/`node_output` line-number entries
+> in `src/legion_graph.py` were corrected (see below) since those functions
+> were directly edited this session. Everything else here should be treated
+> as pending re-verification, not trusted at face value — consistent with
+> this ledger's own entries being self-reported (`view_file_outline`), not
+> independently confirmed.
+
 Component: committee.py
 Status: VERIFIED
 Evidence: `view_file_outline` on `E:\Legion\committee.py`
@@ -220,20 +236,20 @@ Status: VERIFIED
 Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:282`
 Last checked: 2026-07-16 commit b03ab773f2cabb590719bd132bb7895c3c529f04
 
-Component: node_arbitration (src/legion_graph.py:345)
+Component: node_arbitration (src/legion_graph.py:352)
 Status: VERIFIED
-Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:345`
-Last checked: 2026-07-16 commit b03ab773f2cabb590719bd132bb7895c3c529f04
+Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:352`
+Last checked: 2026-07-17 (line renumbered after node_arbitration rewrite — human-gate fix, review_id-based status check)
 
-Component: node_deliberate (src/legion_graph.py:467)
+Component: node_deliberate (src/legion_graph.py:515)
 Status: VERIFIED
-Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:467`
-Last checked: 2026-07-16 commit b03ab773f2cabb590719bd132bb7895c3c529f04
+Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:515`
+Last checked: 2026-07-17 (line shifted — no functional change to this function itself)
 
-Component: node_output (src/legion_graph.py:482)
+Component: node_output (src/legion_graph.py:530)
 Status: VERIFIED
-Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:482`
-Last checked: 2026-07-16 commit b03ab773f2cabb590719bd132bb7895c3c529f04
+Evidence: `view_file_outline` on `E:\Legion\src\\legion_graph.py:530`
+Last checked: 2026-07-17 (line shifted — no functional change to this function itself)
 
 Component: src/pipeline_state.py
 Status: VERIFIED

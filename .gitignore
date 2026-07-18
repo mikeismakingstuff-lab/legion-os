@@ -25,3 +25,9 @@ ollama_list_utf8.txt
 session_history_legion.md
 session_history_legion_v2.md
 full_conversation_archive.md
+
+# OSS reference material — study/comparison only, never shipped
+Reference/
+
+# Quarantined cleanup candidates — pending manual delete
+_pending_delete/

@@ -1,12 +1,6 @@
 {
   "gate_threshold": 0.55,
   "max_ai_calls_per_run": 2,
-  "qwen_max_tokens": 4096,
-  "gemini_max_tokens": 8500,
-  "qwen_retry_max": 3,
-  "qwen_retry_backoff_ms": [15000, 30000, 60000],
-  "qwen_request_min_interval_ms": 20000,
-  "qwen_429_type_check": true,
   "parse_min_length": "user_defined",
   "top_units_to_deliberation": 5,
   "lens_weight_default": 1.0,

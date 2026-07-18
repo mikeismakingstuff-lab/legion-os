@@ -10,7 +10,7 @@ from datetime import datetime
 # CONFIGURATION
 # =========================================================================
 # Paste your fresh key securely inside the quotes below:
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 # Leave the rest of the file completely as-is
 MODEL_BUILDER = "qwen/qwen-2.5-7b-instruct"  # Representing The Engineer

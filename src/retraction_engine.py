@@ -213,8 +213,8 @@ def apply_retraction(
             conn.execute(
                 """
                 INSERT INTO manual_review_queue
-                    (review_id, contested_key_a, contested_key_b, loser_key, projected_blast_radius, affected_record_ids, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (review_id, contested_key_a, contested_key_b, loser_key, projected_blast_radius, affected_record_ids, timestamp, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting_human_review')
                 """,
                 (
                     review_id,

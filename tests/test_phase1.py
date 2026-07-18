@@ -62,11 +62,10 @@ class TestConfig:
     def test_required_keys_present(self):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             cfg = json.load(f)
+        # Note: qwen_*/gemini_* keys were removed — Stage 5 deliberation is
+        # deterministic per spec_committee.md and never reads these values.
         required = [
             "gate_threshold", "max_ai_calls_per_run",
-            "qwen_max_tokens", "gemini_max_tokens",
-            "qwen_retry_max", "qwen_retry_backoff_ms",
-            "qwen_request_min_interval_ms", "qwen_429_type_check",
             "parse_min_length", "top_units_to_deliberation",
             "lens_weight_default", "lens_weight_amplified",
             "lens_weight_floor", "user_emphasis_max_selections",

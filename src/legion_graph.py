@@ -315,6 +315,7 @@ def node_weigh(state: PipelineState) -> dict:
             return {
                 "current_stage": "WEIGH",
                 "blast_radius_exceeded": True,
+                "pending_review_id": pending_row["review_id"],
                 "error_detail": (
                     f"Retraction circuit breaker active: "
                     f"blast radius {blast_pct:.2f}% > 15% threshold. "
@@ -325,13 +326,19 @@ def node_weigh(state: PipelineState) -> dict:
         return {
             "current_stage": "WEIGH",
             "blast_radius_exceeded": False,
+            "pending_review_id": None,
         }
 
     except ManualReviewRequired as exc:
-        # apply_retraction raised directly — surface to arbitration
+        # apply_retraction raised directly — surface to arbitration.
+        # exc.payload carries review_id only for the >15% blast-radius case
+        # (apply_retraction writes the queue row before raising); the
+        # zero-zero-tie case from adjudicate_conflict has no queue row and
+        # no review_id, since nothing was persisted for it.
         return {
             "current_stage": "WEIGH",
             "blast_radius_exceeded": True,
+            "pending_review_id": exc.payload.get("review_id"),
             "error_detail": f"[WEIGH/RETRACTION] {exc}: {exc.payload}",
         }
     except Exception as exc:
@@ -343,118 +350,159 @@ def node_weigh(state: PipelineState) -> dict:
 
 
 def node_arbitration(state: PipelineState) -> dict:
-    """Arbitration gate — OpenRouter committee / manual-review step.
+    """Arbitration gate — human-review checkpoint, with an optional advisory
+    committee opinion attached.
 
-    Behaviour:
-    - If OPENROUTER_API_KEY is set: calls committee.py logic via subprocess
-      to generate a resolution recommendation. Sets arbitration_resolved=True
-      on acceptance.
-    - If no API key: logs the blockage detail and sets arbitration_resolved=False
-      (triggers a 'retry' loop back to weigh for re-evaluation after manual fix).
+    Behaviour (structural constant — see ARCHITECTURE.md §6):
+    - This node NEVER sets arbitration_resolved=True itself. The only thing
+      that can clear the gate is a human (or an explicit approval action)
+      updating manual_review_queue.status to 'approved' for the pending
+      review_id — checked directly against the database below.
+    - If OPENROUTER_API_KEY is set: still calls committee.py, but strictly
+      as an ADVISOR. Its output is logged to pipeline_log as a recommendation
+      for the human reviewer to read — it is never treated as authorization,
+      regardless of the subprocess exit code or what the committee's text
+      output says.
+    - If manual_review_queue.status is 'rejected': the retraction is denied;
+      halt with error_flag=True rather than looping forever.
+    - If status is still 'awaiting_human_review' (the default) or no
+      pending_review_id exists at all (e.g. a zero-zero-tie escalation,
+      which currently has no queue row to check — see note below): hold and
+      retry, exactly as the no-API-key path always did.
     - On any exception: sets error_flag=True (fatal — exits to END).
 
+    Known gap this does NOT fix: adjudicate_conflict's zero-zero-tie raise
+    (retraction_engine.py) never writes a manual_review_queue row, so a tie
+    escalation currently has no persisted review_id and no status a human
+    can ever set to 'approved'. That case will retry up to retry_limit and
+    then hard-halt — fails closed, which is correct, but it has no real
+    resolution path yet. Flagged, not silently patched over.
+
     The arbitration node does NOT call apply_retraction() itself — that is the
-    operator's responsibility after reviewing manual_review_queue. It only
-    determines whether the pipeline can safely continue.
+    operator's responsibility after reviewing manual_review_queue.
     """
     mission_id = state["mission_id"]
     db_path = Path(state["db_path"]) if state.get("db_path") else None
     error_detail = state.get("error_detail", "")
+    review_id = state.get("pending_review_id")
 
     try:
-        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        # ── Check the actual human-set status first ────────────────────────
+        # This is the ONLY thing that can clear the gate. Nothing below this
+        # check — not an API key, not a subprocess exit code — is allowed to
+        # substitute for it.
+        review_status = None
+        if review_id:
+            conn = get_connection(db_path)
+            try:
+                row = conn.execute(
+                    "SELECT status FROM manual_review_queue WHERE review_id = ?",
+                    (review_id,),
+                ).fetchone()
+                review_status = row["status"] if row else None
+            finally:
+                conn.close()
 
-        if api_key:
-            # ── Committee arbitration via OpenRouter ──────────────────────────
-            # Build a focused spec for the committee describing the retraction
-            # conflict, then invoke committee.py to get a resolution recommendation.
-            import subprocess
-            import tempfile
-
-            spec_content = (
-                f"# Retraction Arbitration Request\n\n"
-                f"## Mission ID\n{mission_id}\n\n"
-                f"## Blocked Retraction Detail\n{error_detail}\n\n"
-                f"## Resolution Required\n"
-                f"Review the manual_review_queue entry above. "
-                f"Assess whether the retraction should proceed or be discarded. "
-                f"Output a JSON object: "
-                f'`{{"decision": "proceed"|"discard", "rationale": "..."}}`'
-            )
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".md", delete=False, encoding="utf-8"
-            ) as f:
-                spec_path = f.name
-                f.write(spec_content)
-
-            committee_script = str(
-                Path(__file__).resolve().parent.parent / "committee.py"
-            )
-
-            result = subprocess.run(
-                ["python", committee_script],
-                input=spec_content,
-                capture_output=True,
-                text=True,
-                timeout=180,
-                encoding="utf-8",
-            )
-
-            Path(spec_path).unlink(missing_ok=True)
-
-            if result.returncode != 0:
-                return {
-                    "current_stage": "ARBITRATION",
-                    "arbitration_resolved": False,
-                    "error_detail": (
-                        f"[ARBITRATION] Committee returned non-zero exit. "
-                        f"Stderr: {result.stderr[:500]}"
-                    ),
-                }
-
-            # Committee succeeded — mark resolved so router continues to deliberate
+        if review_status == "approved":
             return {
                 "current_stage": "ARBITRATION",
                 "arbitration_resolved": True,
                 "blast_radius_exceeded": False,
                 "error_flag": False,
                 "error_detail": (
-                    f"Arbitration resolved via OpenRouter committee. "
-                    f"Pipeline cleared for deliberation."
+                    f"Arbitration cleared: manual_review_queue/{review_id} "
+                    f"marked 'approved' by human review."
                 ),
             }
 
-        else:
-            # ── No API key — log and hold for manual resolution ───────────────
-            # Persist the unresolved arbitration event to pipeline_log so the
-            # operator can take action, then signal a retry loop.
-            conn = get_connection(db_path)
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO pipeline_log
-                        (log_id, mission_id, stage, event, detail, timestamp, error_code)
-                    VALUES (?, ?, 'DELIBERATE', 'pipeline_halt', ?, datetime('now'), ?)
-                    """,
-                    (
-                        str(uuid.uuid4()),
-                        mission_id,
-                        f"Arbitration hold: {error_detail}",
-                        "blast_radius_exceeded",
-                    ),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
+        if review_status == "rejected":
             return {
                 "current_stage": "ARBITRATION",
                 "arbitration_resolved": False,
+                "error_flag": True,
                 "error_detail": (
-                    "Arbitration hold: no OPENROUTER_API_KEY set. "
-                    "Resolve manual_review_queue entry and re-invoke graph."
+                    f"Arbitration denied: manual_review_queue/{review_id} "
+                    f"marked 'rejected' by human review. Retraction will not proceed."
                 ),
             }
+
+        # ── Still awaiting human review. Optionally get an advisory opinion ──
+        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        advisory_note = ""
+
+        if api_key:
+            import subprocess
+
+            spec_content = (
+                f"# Retraction Arbitration Request (ADVISORY ONLY — human decides)\n\n"
+                f"## Mission ID\n{mission_id}\n\n"
+                f"## Blocked Retraction Detail\n{error_detail}\n\n"
+                f"## Resolution Required\n"
+                f"Review the manual_review_queue entry above and provide your\n"
+                f"recommendation for the human operator. This output is advisory\n"
+                f"only — it does not authorize continuation by itself.\n"
+                f"Output a JSON object: "
+                f'`{{"decision": "proceed"|"discard", "rationale": "..."}}`'
+            )
+
+            committee_script = str(
+                Path(__file__).resolve().parent.parent / "committee.py"
+            )
+
+            try:
+                result = subprocess.run(
+                    ["python", committee_script],
+                    input=spec_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                    encoding="utf-8",
+                )
+                if result.returncode == 0:
+                    advisory_note = (
+                        f" Committee advisory recorded (see committee_memo.md); "
+                        f"awaiting human decision on review_id={review_id}."
+                    )
+                else:
+                    advisory_note = (
+                        f" Committee advisory call failed (exit {result.returncode}); "
+                        f"proceeding without it — still awaiting human decision."
+                    )
+            except Exception as exc:
+                advisory_note = (
+                    f" Committee advisory call raised {exc}; "
+                    f"proceeding without it — still awaiting human decision."
+                )
+
+        conn = get_connection(db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO pipeline_log
+                    (log_id, mission_id, stage, event, detail, timestamp, error_code)
+                VALUES (?, ?, 'DELIBERATE', 'pipeline_halt', ?, datetime('now'), ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    mission_id,
+                    f"Arbitration hold: {error_detail}{advisory_note}",
+                    "blast_radius_exceeded",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return {
+            "current_stage": "ARBITRATION",
+            "arbitration_resolved": False,
+            "error_detail": (
+                f"Arbitration hold: review_id={review_id} status is still "
+                f"'{review_status or 'unset'}'. A human must set "
+                f"manual_review_queue.status to 'approved' or 'rejected' "
+                f"before this can resolve.{advisory_note}"
+            ),
+        }
 
     except Exception as exc:
         return {

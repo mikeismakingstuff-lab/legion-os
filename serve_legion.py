@@ -13,30 +13,58 @@ or pass it as an argument:
 
 import sys
 import os
+import base64
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from functools import partial
 
 # --- CONFIG ---
 PORT = 8420
-SECRET_PATH = "legion-x9k2m4p8q1"   # obscurity token - change this to your own random string
+AUTH_USERNAME = os.environ.get("LEGION_SERVER_USER", "legion")
+AUTH_PASSWORD = os.environ.get("LEGION_SERVER_PASSWORD")
 SERVE_DIR = sys.argv[1] if len(sys.argv) > 1 else "."
+BIND_ADDRESS = "127.0.0.1"
 # ---------------
 
-class ScopedHandler(SimpleHTTPRequestHandler):
-    """Only serves requests that include the secret path prefix. Read-only."""
+if not AUTH_PASSWORD:
+    sys.stderr.write(
+        "[ERROR] LEGION_SERVER_PASSWORD is not set. Refusing to start with no "
+        "credential rather than fall back to a hardcoded default.\n"
+        "Set it first, e.g.:\n"
+        "  set LEGION_SERVER_PASSWORD=your-password-here   (Windows cmd)\n"
+        "  $env:LEGION_SERVER_PASSWORD=\"your-password-here\"  (PowerShell)\n"
+    )
+    sys.exit(1)
 
-    def translate_path(self, path):
-        # Strip the secret prefix before resolving to a real file path
-        prefix = f"/{SECRET_PATH}"
-        if path.startswith(prefix):
-            path = path[len(prefix):] or "/"
-        else:
-            path = "/__blocked__"  # will 404
-        return super().translate_path(path)
+class AuthHandler(SimpleHTTPRequestHandler):
+    """Serves requests only if valid Basic Auth is provided. Read-only."""
+
+    def do_AUTHHEAD(self):
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="LEGION Context Server"')
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+
+    def check_auth(self):
+        auth_header = self.headers.get("Authorization")
+        if not auth_header:
+            return False
+        
+        try:
+            auth_type, encoded_credentials = auth_header.split(" ", 1)
+            if auth_type.lower() != "basic":
+                return False
+            
+            decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
+            username, password = decoded_credentials.split(":", 1)
+            
+            return username == AUTH_USERNAME and password == AUTH_PASSWORD
+        except Exception:
+            return False
 
     def do_GET(self):
-        if not self.path.startswith(f"/{SECRET_PATH}"):
-            self.send_error(404, "Not found")
+        if not self.check_auth():
+            self.do_AUTHHEAD()
+            self.wfile.write(b"Unauthorized")
             return
         return super().do_GET()
 
@@ -57,11 +85,11 @@ class ScopedHandler(SimpleHTTPRequestHandler):
 
 def main():
     os.chdir(SERVE_DIR)
-    handler = partial(ScopedHandler, directory=SERVE_DIR)
-    server = HTTPServer(("0.0.0.0", PORT), handler)
+    handler = partial(AuthHandler, directory=SERVE_DIR)
+    server = HTTPServer((BIND_ADDRESS, PORT), handler)
     print(f"Serving {os.path.abspath(SERVE_DIR)}")
-    print(f"Local URL:  http://localhost:{PORT}/{SECRET_PATH}/")
-    print(f"LAN URL:    http://<your-lan-ip>:{PORT}/{SECRET_PATH}/")
+    print(f"Local URL:  http://{BIND_ADDRESS}:{PORT}/")
+    print("Server is secured with HTTP Basic Authentication.")
     print("Run a tunnel (ngrok/cloudflared) pointed at this port to get a public URL.")
     print("Ctrl+C to stop.")
     try:
